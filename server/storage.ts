@@ -1,11 +1,10 @@
-import { mkdir, writeFile, unlink, readFile } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, extname, resolve } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import sharp from "sharp";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { config } from "./config.js";
+import { uploadStore } from "./upload-store.js";
 import { transaction, type DB } from "./db.js";
 import { room } from "./authorization.js";
 import { requireThat, id } from "./errors.js";
@@ -169,8 +168,7 @@ async function save(
   if (input.purpose === "message") await room(db, access, "ATTACH_FILES");
   const clean = await sanitizeUpload(data, name, mime, input.purpose);
   const storageKey = randomUUID();
-  const path = join(config.STORAGE_PATH, storageKey);
-  await writeFile(path, clean.buffer, { flag: "wx", mode: 0o600 });
+  await uploadStore.put(storageKey, clean.buffer, clean.mime);
   try {
     const uploadId = randomUUID();
     await db.query(
@@ -195,12 +193,12 @@ async function save(
       type: clean.mime,
     };
   } catch (e) {
-    await unlink(path).catch(() => {});
+    await uploadStore.delete(storageKey).catch(() => {});
     throw e;
   }
 }
 export async function storageRoutes(app: FastifyInstance) {
-  await mkdir(config.STORAGE_PATH, { recursive: true, mode: 0o700 });
+  await uploadStore.prepare();
   app.post("/api/uploads", async (req, reply) => {
     const input = uploadQuery.parse(req.query);
     const maxBytes =
@@ -275,8 +273,6 @@ export async function storageRoutes(app: FastifyInstance) {
         `${upload.content_type.startsWith("image/") ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(upload.original_name)}`,
       )
       .type(upload.content_type);
-    return reply.send(
-      createReadStream(join(config.STORAGE_PATH, upload.storage_key)),
-    );
+    return reply.send(await uploadStore.get(upload.storage_key));
   });
 }

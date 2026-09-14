@@ -1,0 +1,39 @@
+# Run behind a TLS ingress. External database, R2 and LiveKit Cloud.
+# No database/SFU container and no cloud resources are created by this file.
+services:
+  api:
+    image: ${NOCTIS_IMAGE:-noctis:local}
+    build: .
+    env_file: .env.distributed
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+    ports:
+      - "127.0.0.1:3001:3001"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+  worker:
+    image: ${NOCTIS_IMAGE:-noctis:local}
+    build: .
+    env_file: .env.distributed
+    environment:
+      NODE_ENV: production
+    command: [node, build/server/server/worker.js]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    healthcheck:
+      disable: true
+  migrate:
+    image: ${NOCTIS_IMAGE:-noctis:local}
+    build: .
+    profiles: [tools]
+    env_file: .env.migration
+    environment:
+      NODE_ENV: production
+    command: [node, build/server/server/migrate.js]
+    restart: "no"
+    healthcheck:
+      disable: true

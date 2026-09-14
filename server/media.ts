@@ -293,7 +293,9 @@ export async function mediaRoutes(app: FastifyInstance) {
         );
         const incoming = new URL(req.url, config.APP_ORIGIN);
         const target = new URL(config.LIVEKIT_INTERNAL_URL);
-        target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
+        target.protocol = ["https:", "wss:"].includes(target.protocol)
+          ? "wss:"
+          : "ws:";
         target.pathname = incoming.pathname.replace("/api/media", "");
         target.search = incoming.search;
         target.searchParams.set("access_token", access.token);

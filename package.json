@@ -32,9 +32,13 @@
     "audit:verify": "node scripts/verify-audit.mjs",
     "test:load": "node scripts/run-tests.mjs load",
     "test:replicas": "node scripts/test-replicas.mjs",
-    "test:music-media": "node scripts/smoke-music-media.mjs"
+    "test:music-media": "node scripts/smoke-music-media.mjs",
+    "build:web": "tsc --noEmit && vite build",
+    "configure:vercel": "node scripts/configure-vercel.mjs",
+    "test:deployment": "node --import tsx --test server/tests/object-store.test.ts scripts/configure-vercel.test.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1132.0",
     "@fastify/cookie": "^11.1.2",
     "@fastify/helmet": "^13.1.1",
     "@fastify/multipart": "^10.1.1",
