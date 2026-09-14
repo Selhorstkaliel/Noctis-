@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+.git
+.codex
+.agents
+.env
+.env.*
+.data
+.runtime
+.uv-cache
+screenshots
+tests
+server/tests
+test-results
+playwright-report
+*.log

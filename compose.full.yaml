@@ -1,0 +1,102 @@
+x-noctis-image: &noctis-image
+  image: noctis:local
+
+x-noctis-runtime: &noctis-runtime
+  NODE_ENV: development
+  HOST: 0.0.0.0
+  PORT: 3001
+  APP_ORIGIN: ${APP_ORIGIN:?Run npm run docker:setup}
+  DATABASE_SSL: "false"
+  SESSION_SECRET: ${SESSION_SECRET:?Run npm run docker:setup}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Run npm run docker:setup}
+  STORAGE_PATH: /var/lib/noctis/uploads
+  MAIL_TRANSPORT: ${MAIL_TRANSPORT:-file}
+  MAIL_FROM: ${MAIL_FROM:-noctis@localhost.invalid}
+  SMTP_HOST: ${SMTP_HOST:-smtp.mailersend.net}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  LIVEKIT_INTERNAL_URL: http://sfu:7880
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Run npm run docker:setup}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Run npm run docker:setup}
+  MUSIC_AUDIO_HOSTS: ${MUSIC_AUDIO_HOSTS:-}
+  MUSIC_MAX_QUEUE: ${MUSIC_MAX_QUEUE:-100}
+  MUSIC_MAX_TRACK_SECONDS: ${MUSIC_MAX_TRACK_SECONDS:-3600}
+  MUSIC_MAX_SOURCE_BYTES: ${MUSIC_MAX_SOURCE_BYTES:-209715200}
+  MUSIC_FETCH_TIMEOUT_MS: ${MUSIC_FETCH_TIMEOUT_MS:-10000}
+  MUSIC_IDLE_DISCONNECT_SECONDS: ${MUSIC_IDLE_DISCONNECT_SECONDS:-300}
+  FFMPEG_PATH: ffmpeg
+
+services:
+  bootstrap:
+    <<: *noctis-image
+    environment:
+      NODE_ENV: development
+      DATABASE_SSL: "false"
+      ADMIN_DATABASE_URL: ${ADMIN_DATABASE_URL:?Run npm run docker:setup}
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Run npm run docker:setup}
+      DATABASE_URL: ${DATABASE_URL:?Run npm run docker:setup}
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:?Run npm run docker:setup}
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Run npm run docker:setup}
+    command: [node, build/server/server/migrate.js, --bootstrap]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck: { disable: true }
+    restart: "no"
+
+  seed:
+    <<: *noctis-image
+    environment:
+      NODE_ENV: development
+      DATABASE_SSL: "false"
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Run npm run docker:setup}
+      SEED_EMAIL: ${SEED_EMAIL:?Run npm run setup:local}
+      SEED_PASSWORD: ${SEED_PASSWORD:?Run npm run setup:local}
+    command: [node, build/server/server/seed.js, --demo]
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+    healthcheck: { disable: true }
+    restart: "no"
+
+  api:
+    <<: *noctis-image
+    build: .
+    environment:
+      <<: *noctis-runtime
+      DATABASE_URL: ${DATABASE_URL:?Run npm run docker:setup}
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:?Run npm run docker:setup}
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Run npm run docker:setup}
+      LISTENER_DATABASE_URL: ${DATABASE_URL}
+    ports: ["127.0.0.1:3001:3001"]
+    volumes: [uploads:/var/lib/noctis/uploads]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      seed: { condition: service_completed_successfully }
+      sfu: { condition: service_started }
+    restart: unless-stopped
+
+  worker:
+    <<: *noctis-image
+    environment:
+      <<: *noctis-runtime
+      DATABASE_URL: ${WORKER_DATABASE_URL:?Run npm run docker:setup}
+      AUTH_DATABASE_URL: ${WORKER_DATABASE_URL}
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL}
+      LISTENER_DATABASE_URL: ${WORKER_DATABASE_URL}
+    command: [node, build/server/server/worker.js]
+    volumes: [uploads:/var/lib/noctis/uploads]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck: { disable: true }
+    depends_on:
+      seed: { condition: service_completed_successfully }
+      sfu: { condition: service_started }
+    restart: unless-stopped
+
+volumes:
+  uploads:

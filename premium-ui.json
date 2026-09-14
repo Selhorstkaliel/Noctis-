@@ -1,0 +1,29 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": ["src"],
+  "locale": "en-US",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": [
+    "Select/Listbox",
+    "Date",
+    "Form",
+    "Scrollbar",
+    "Toast",
+    "CRUD"
+  ],
+  "ownership": {
+    "Select/Listbox": "native",
+    "Date": "native"
+  },
+  "requiredCommands": ["typecheck", "build", "browser", "format"],
+  "commands": {
+    "typecheck": "npm run typecheck",
+    "build": "npm run build",
+    "browser": "npm test",
+    "format": "npm run format:check"
+  },
+  "evidence": {
+    "crudFullFlow": "tests/live.spec.ts",
+    "failurePaths": "server/tests/security.test.ts"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "home": {
+    "title": "Home — Noctis",
+    "pageWidth": 1440,
+    "viewport": 1440,
+    "imageFailures": [],
+    "mainSize": {
+      "x": 291,
+      "y": 62,
+      "width": 1149,
+      "height": 938,
+      "top": 62,
+      "right": 1440,
+      "bottom": 1000,
+      "left": 291
+    }
+  },
+  "mobile": {
+    "pageWidth": 390,
+    "viewport": 390
+  },
+  "errors": []
+}

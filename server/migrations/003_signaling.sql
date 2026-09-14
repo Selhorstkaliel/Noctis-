@@ -1,0 +1,11 @@
+SET search_path=noctis,pg_catalog;
+CREATE TABLE realtime_signals(id text PRIMARY KEY,source_connection text NOT NULL REFERENCES voice_participants(connection_id) ON DELETE CASCADE,target_connection text NOT NULL REFERENCES voice_participants(connection_id) ON DELETE CASCADE,payload_encrypted text NOT NULL CHECK(length(payload_encrypted)<100000),created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX signals_expiry ON realtime_signals(created_at);
+ALTER TABLE realtime_signals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY signal_send ON realtime_signals FOR INSERT TO noctis_api WITH CHECK(session_valid() AND EXISTS(SELECT 1 FROM voice_participants a JOIN voice_participants b ON b.channel_id=a.channel_id WHERE a.connection_id=source_connection AND a.user_id=current_user_id() AND a.session_id=current_setting('noctis.session_id',true) AND b.connection_id=target_connection AND channel_permission(a.channel_id,'CONNECT_VOICE')));
+CREATE POLICY signal_receive ON realtime_signals FOR SELECT TO noctis_api USING(session_valid() AND created_at>now()-interval '30 seconds' AND EXISTS(SELECT 1 FROM voice_participants v WHERE v.connection_id=target_connection AND v.user_id=current_user_id() AND v.session_id=current_setting('noctis.session_id',true) AND channel_permission(v.channel_id,'CONNECT_VOICE')));
+CREATE POLICY signal_cleanup ON realtime_signals TO noctis_worker USING(true);
+GRANT SELECT,INSERT ON realtime_signals TO noctis_api;
+GRANT SELECT,DELETE ON realtime_signals TO noctis_worker;
+GRANT SELECT,DELETE ON rate_limits,oauth_states TO noctis_worker;
+RESET search_path;

@@ -1,0 +1,28 @@
+{$PUBLIC_HOST} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=()"
+    -Server
+  }
+  reverse_proxy {
+    dynamic a {
+      name api
+      port 3001
+      versions ipv4
+      refresh 5s
+      resolvers 127.0.0.11
+    }
+    lb_policy least_conn
+    lb_try_duration 2s
+    fail_duration 10s
+    max_fails 2
+    unhealthy_status 503
+    transport http {
+      dial_timeout 2s
+      response_header_timeout 15s
+    }
+    stream_close_delay 30s
+  }
+}

@@ -1,0 +1,165 @@
+name: noctis-production
+x-api-environment: &api-environment
+  NODE_ENV: production
+  MAIL_TRANSPORT: smtp
+  MAIL_FROM: ${MAIL_FROM:?Set a sender on your verified MailerSend domain}
+  SMTP_HOST: ${SMTP_HOST:-smtp.mailersend.net}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:?Set the MailerSend SMTP username}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:?Set the MailerSend SMTP password}
+  HOST: 0.0.0.0
+  PORT: 3001
+  APP_ORIGIN: https://${PUBLIC_HOST:?Set a public hostname}
+  DATABASE_URL: ${DATABASE_URL:?Set restricted API credentials}
+  AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:?Set authentication credentials}
+  WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Set worker credentials}
+  DATABASE_SSL: "true"
+  LISTENER_DATABASE_URL: ${LISTENER_DATABASE_URL:-${DATABASE_URL}}
+  API_POOL_SIZE: ${API_POOL_SIZE:-15}
+  AUTH_POOL_SIZE: ${AUTH_POOL_SIZE:-5}
+  WORKER_POOL_SIZE: ${WORKER_POOL_SIZE:-5}
+  REALTIME_CONCURRENCY: ${REALTIME_CONCURRENCY:-4}
+  DATABASE_CA: /run/secrets/postgres_ca
+  SESSION_SECRET: ${SESSION_SECRET:?Set a random 32-byte hex secret}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a random 32-byte hex key}
+  TRUST_PROXY_CIDR: 172.30.10.2/32
+  STORAGE_PATH: /var/lib/noctis/uploads
+  LIVEKIT_INTERNAL_URL: http://sfu:7880
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set the SFU API key}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set a random SFU secret of at least 32 characters}
+  MUSIC_AUDIO_HOSTS: ${MUSIC_AUDIO_HOSTS:-}
+  MUSIC_MAX_QUEUE: ${MUSIC_MAX_QUEUE:-100}
+  MUSIC_MAX_TRACK_SECONDS: ${MUSIC_MAX_TRACK_SECONDS:-3600}
+  MUSIC_MAX_SOURCE_BYTES: ${MUSIC_MAX_SOURCE_BYTES:-209715200}
+  MUSIC_FETCH_TIMEOUT_MS: ${MUSIC_FETCH_TIMEOUT_MS:-10000}
+  MUSIC_IDLE_DISCONNECT_SECONDS: ${MUSIC_IDLE_DISCONNECT_SECONDS:-300}
+  FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+  SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+  TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+  TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+services:
+  sfu:
+    image: livekit/livekit-server:v1.9.12
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: false
+          node_ip: ${MEDIA_PUBLIC_IP:?Set this host's public IPv4 address}
+        keys:
+          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+        room:
+          max_participants: 0
+        logging:
+          level: warn
+    ports: ["7881:7881", "7882:7882/udp"]
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: noctis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set database administrator password}
+    entrypoint: [/bin/sh, /opt/noctis/postgres-tls.sh]
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./infra/postgres-tls.sh:/opt/noctis/postgres-tls.sh:ro
+      - ./infra/pg_hba.conf:/opt/noctis/pg_hba.conf:ro
+    secrets: [postgres_cert, postgres_key, postgres_ca]
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d noctis"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    build: .
+    profiles: [tools]
+    environment:
+      NODE_ENV: production
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set migrator credentials}
+      DATABASE_SSL: "true"
+      DATABASE_CA: /run/secrets/postgres_ca
+    secrets: [postgres_ca]
+    command: [node, build/server/server/migrate.js]
+    networks: [database]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck: { disable: true }
+  api:
+    build: .
+    environment: *api-environment
+    secrets: [postgres_ca]
+    volumes: [uploads:/var/lib/noctis/uploads]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [database, edge]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+  worker:
+    build: .
+    environment:
+      <<: *api-environment
+      DATABASE_URL: ${WORKER_DATABASE_URL}
+      AUTH_DATABASE_URL: ${WORKER_DATABASE_URL}
+      LISTENER_DATABASE_URL: ${WORKER_DATABASE_URL}
+    command: [node, build/server/server/worker.js]
+    secrets: [postgres_ca]
+    volumes: [uploads:/var/lib/noctis/uploads]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [database, edge]
+    healthcheck: { disable: true }
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+        ipv4_address: 172.30.10.2
+    depends_on: [api]
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  uploads:
+  caddy_data:
+  caddy_config:
+networks:
+  database: { internal: true }
+  edge:
+    ipam:
+      config: [{ subnet: 172.30.10.0/24 }]
+secrets:
+  postgres_ca:
+    { file: "${POSTGRES_CA_FILE:?Provide the PostgreSQL CA certificate}" }
+  postgres_cert:
+    {
+      file: "${POSTGRES_CERT_FILE:?Provide a server certificate with postgres in its SAN}",
+    }
+  postgres_key: { file: "${POSTGRES_KEY_FILE:?Provide the private server key}" }
