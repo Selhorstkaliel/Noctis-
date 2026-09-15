@@ -15,3 +15,16 @@ server/tests
 test-results
 playwright-report
 *.log
+.vercel
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+credentials.json
+secrets
+backups
+*.dump
+*.sql.gz
+*.zip
+*.tmp

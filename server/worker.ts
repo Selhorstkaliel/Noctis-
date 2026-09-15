@@ -4,8 +4,7 @@ import { boundedFetch, exchange, providers, enabled } from "./integrations.js";
 import { encrypt, decrypt } from "./crypto.js";
 import { requireThat } from "./errors.js";
 import { z } from "zod";
-import { unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { uploadStore } from "./upload-store.js";
 import { config } from "./config.js";
 import { maintainMedia } from "./media.js";
 import { maintainMusic, closeMusic } from "./music/playback.js";
@@ -342,7 +341,7 @@ export async function maintenance() {
     if (!/^[a-f0-9-]{36}$/.test(row.storage_key))
       throw new Error("Invalid storage key.");
     try {
-      await unlink(join(config.STORAGE_PATH, row.storage_key));
+      await uploadStore.delete(row.storage_key);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
     }

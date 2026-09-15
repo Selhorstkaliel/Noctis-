@@ -20,6 +20,11 @@ const env = z
     SESSION_SECRET: z.string().regex(/^[a-f\d]{64}$/i),
     ENCRYPTION_KEY: z.string().regex(/^[a-f\d]{64}$/i),
     STORAGE_PATH: z.string().min(1),
+    STORAGE_DRIVER: z.enum(["local", "r2"]).default("local"),
+    R2_ENDPOINT: z.string().default(""),
+    R2_BUCKET: z.string().default(""),
+    R2_ACCESS_KEY_ID: z.string().default(""),
+    R2_SECRET_ACCESS_KEY: z.string().default(""),
     DATABASE_SSL: z.enum(["true", "false"]).default("true"),
     API_POOL_SIZE: z.coerce.number().int().min(2).max(50).default(15),
     AUTH_POOL_SIZE: z.coerce.number().int().min(1).max(20).default(5),
@@ -76,6 +81,29 @@ export const config = {
   ),
 };
 export const production = config.NODE_ENV === "production";
+if (config.STORAGE_DRIVER === "r2") {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(config.R2_ENDPOINT);
+  } catch {
+    throw new Error("R2_ENDPOINT must be a valid HTTPS origin.");
+  }
+  if (
+    endpoint.protocol !== "https:" ||
+    endpoint.username ||
+    endpoint.password ||
+    endpoint.search ||
+    endpoint.hash ||
+    endpoint.pathname !== "/" ||
+    !endpoint.hostname.endsWith(".r2.cloudflarestorage.com") ||
+    !config.R2_BUCKET ||
+    !config.R2_ACCESS_KEY_ID ||
+    !config.R2_SECRET_ACCESS_KEY
+  )
+    throw new Error(
+      "Configure a private R2 bucket and server-side S3 credentials.",
+    );
+}
 if (production && config.MAIL_TRANSPORT !== "smtp")
   throw new Error("Production requires SMTP email delivery.");
 if (
