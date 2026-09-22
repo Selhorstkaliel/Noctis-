@@ -24,6 +24,9 @@
     "db:migrate": "tsx server/migrate.ts",
     "db:bootstrap": "tsx server/migrate.ts --bootstrap",
     "db:seed": "tsx server/seed.ts --demo",
+    "supabase:setup": "node scripts/setup-supabase.mjs",
+    "supabase:migrate": "node --env-file=.env.supabase.migration --import tsx server/migrate.ts",
+    "supabase:verify": "node scripts/verify-supabase.mjs",
     "start": "node build/server/server/index.js",
     "start:worker": "node build/server/server/worker.js",
     "test:setup": "node scripts/setup-test.mjs",
@@ -35,7 +38,8 @@
     "test:music-media": "node scripts/smoke-music-media.mjs",
     "build:web": "tsc --noEmit && vite build",
     "configure:vercel": "node scripts/configure-vercel.mjs",
-    "test:deployment": "node --import tsx --test server/tests/object-store.test.ts scripts/configure-vercel.test.mjs"
+    "prepare:railway": "node scripts/prepare-railway.mjs",
+    "test:deployment": "node --import tsx --test server/tests/object-store.test.ts server/tests/upload-gc.test.ts scripts/configure-vercel.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1132.0",

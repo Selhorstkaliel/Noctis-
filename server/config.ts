@@ -21,6 +21,7 @@ const env = z
     ENCRYPTION_KEY: z.string().regex(/^[a-f\d]{64}$/i),
     STORAGE_PATH: z.string().min(1),
     STORAGE_DRIVER: z.enum(["local", "r2"]).default("local"),
+    UPLOAD_GC_OWNER: z.enum(["api", "worker"]).default("worker"),
     R2_ENDPOINT: z.string().default(""),
     R2_BUCKET: z.string().default(""),
     R2_ACCESS_KEY_ID: z.string().default(""),

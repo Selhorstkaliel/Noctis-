@@ -70,6 +70,9 @@ Run the suites sequentially: browser setup resets test rate buckets. Load tests 
 
 ## Deployment
 
+[Supabase + Railway + Vercel](docs/supabase-railway-deploy.md) records the current
+cloud database setup, private deployment profiles and remaining publication steps.
+
 [DEPLOYMENT.md](DEPLOYMENT.md) covers HTTPS, database TLS, role provisioning, SFU networking and backups. [ARCHITECTURE.md](ARCHITECTURE.md) describes services and API contracts. [SECURITY.md](SECURITY.md) records security boundaries. [VERIFICATION.md](VERIFICATION.md) records executed checks.
 
 OAuth connections require your provider applications; unconfigured providers stay disabled. Calls use a self-hosted LiveKit SFU with no application-level participant cap. The local regression joins 13 real browser participants and verifies that each browser keeps one WebRTC peer connection. Public capacity depends on the CPU and network available to the SFU deployment. No external accounts are connected automatically. Billing and hosted deployment are not included.

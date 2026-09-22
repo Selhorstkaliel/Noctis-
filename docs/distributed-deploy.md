@@ -1,5 +1,10 @@
 # Noctis — operação distribuída e rollback
 
+> Atualização de 15/09/2026: o Supabase já foi preparado e validado. A arquitetura
+> escolhida usa Railway para API/worker e volume local na API antes do R2.
+> Consulte [o estado e roteiro atuais](supabase-railway-deploy.md). As pendências
+> e observações abaixo registram a proposta anterior à conexão com o Supabase.
+
 Estado: preparação para revisão; **nenhum deploy de produção concluído**.
 Leia primeiro [a auditoria](production-audit.md). Supabase é alternativa em
 avaliação ao Neon; não foi criado um banco nem migrada a autenticação.

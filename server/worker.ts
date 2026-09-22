@@ -5,6 +5,7 @@ import { encrypt, decrypt } from "./crypto.js";
 import { requireThat } from "./errors.js";
 import { z } from "zod";
 import { uploadStore } from "./upload-store.js";
+import { collectUploadGarbage } from "./upload-gc.js";
 import { config } from "./config.js";
 import { maintainMedia } from "./media.js";
 import { maintainMusic, closeMusic } from "./music/playback.js";
@@ -334,21 +335,8 @@ export async function maintenance() {
   await workerPool.query(
     "WITH expired AS (DELETE FROM uploads u WHERE created_at<now()-interval '1 day' AND NOT EXISTS(SELECT 1 FROM message_attachments a WHERE a.upload_id=u.id) AND NOT EXISTS(SELECT 1 FROM profiles p WHERE p.avatar_upload_id=u.id) RETURNING storage_key) INSERT INTO upload_gc(storage_key) SELECT storage_key FROM expired ON CONFLICT DO NOTHING",
   );
-  const garbage = await workerPool.query(
-    "SELECT storage_key FROM upload_gc ORDER BY created_at LIMIT 100",
-  );
-  for (const row of garbage.rows) {
-    if (!/^[a-f0-9-]{36}$/.test(row.storage_key))
-      throw new Error("Invalid storage key.");
-    try {
-      await uploadStore.delete(row.storage_key);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
-    }
-    await workerPool.query("DELETE FROM upload_gc WHERE storage_key=$1", [
-      row.storage_key,
-    ]);
-  }
+  if (config.UPLOAD_GC_OWNER === "worker")
+    await collectUploadGarbage(workerPool, uploadStore);
   await workerPool.query(
     "DELETE FROM presence WHERE updated_at<now()-interval '2 minutes'",
   );

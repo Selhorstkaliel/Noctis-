@@ -66,6 +66,17 @@ try {
   await db.query(
     "CREATE TABLE IF NOT EXISTS public.schema_migrations(name text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())",
   );
+  // Supabase may apply default Data API grants to new public tables.
+  // Only the owning migration role needs access to migration history.
+  await db.query(
+    "ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY",
+  );
+  await db.query("REVOKE ALL ON public.schema_migrations FROM PUBLIC");
+  const apiRoles = await db.query<{ rolname: string }>(
+    "SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated')",
+  );
+  for (const { rolname } of apiRoles.rows)
+    await db.query(`REVOKE ALL ON public.schema_migrations FROM "${rolname}"`);
   const dir = fileURLToPath(new URL("./migrations/", import.meta.url));
   for (const name of (await readdir(dir))
     .filter((n) => n.endsWith(".sql"))

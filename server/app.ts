@@ -11,7 +11,9 @@ import { ZodError } from "zod";
 import { config, production } from "./config.js";
 import { authHook, authRoutes } from "./auth.js";
 import { accountSecurityRoutes } from "./account-security.js";
-import { apiPool, authPool, closePools } from "./db.js";
+import { apiPool, authPool, workerPool, closePools } from "./db.js";
+import { collectUploadGarbage } from "./upload-gc.js";
+import { uploadStore } from "./upload-store.js";
 import { readRoutes } from "./domain/read.js";
 import { chatRoutes } from "./domain/chat.js";
 import { communityRoutes } from "./domain/community.js";
@@ -217,5 +219,28 @@ export async function buildApp(
       error: { message: "This resource is unavailable.", requestId: req.id },
     }),
   );
+  if (config.UPLOAD_GC_OWNER === "api") {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let collecting: Promise<void> | undefined;
+    const collect = () => {
+      if (collecting) return;
+      collecting = collectUploadGarbage(workerPool, uploadStore)
+        .catch(() => {
+          app.log.error({ kind: "storage" }, "Upload cleanup will retry");
+        })
+        .finally(() => {
+          collecting = undefined;
+        });
+    };
+    app.addHook("onReady", async () => {
+      collect();
+      timer = setInterval(collect, 60000);
+      timer.unref();
+    });
+    app.addHook("onClose", async () => {
+      clearInterval(timer);
+      await collecting;
+    });
+  }
   return app;
 }

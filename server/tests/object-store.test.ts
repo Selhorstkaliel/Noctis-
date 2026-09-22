@@ -25,7 +25,9 @@ test("local objects retain bytes, reject traversal/overwrite and delete idempote
     await store.prepare();
     await store.put(key, data, "application/octet-stream");
     assert.deepEqual(await bytes(await store.get(key)), data);
-    assert.equal((await stat(join(root, key))).mode & 0o777, 0o600);
+    // Windows ACLs do not expose POSIX permission bits through stat().
+    if (process.platform !== "win32")
+      assert.equal((await stat(join(root, key))).mode & 0o777, 0o600);
     await assert.rejects(store.put(key, data, "text/plain"));
     for (const key of ["../secret", "/tmp/secret", "nested/file", ""]) {
       await assert.rejects(store.put(key, data, "text/plain"));
