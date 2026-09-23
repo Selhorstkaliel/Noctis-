@@ -11,10 +11,11 @@ try {
   check("verified database TLS configured", config.DATABASE_SSL === "true");
   check(
     "SMTP delivery configured",
-    config.MAIL_TRANSPORT === "smtp" &&
+    (config.MAIL_TRANSPORT === "smtp" &&
       !!config.SMTP_HOST &&
       !!config.SMTP_USER &&
-      !!config.SMTP_PASSWORD,
+      !!config.SMTP_PASSWORD) ||
+      (config.MAIL_TRANSPORT === "mailersend" && !!config.MAILERSEND_API_TOKEN),
   );
   check(
     "distinct encryption and session keys",
@@ -88,4 +89,3 @@ console.log(
   JSON.stringify({ verified: checks.every((c) => c.passed), checks }, null, 2),
 );
 if (checks.some((c) => !c.passed)) process.exitCode = 1;
-

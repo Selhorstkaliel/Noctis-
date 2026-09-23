@@ -6,8 +6,9 @@ const env = z
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
-    MAIL_TRANSPORT: z.enum(["file", "smtp"]).default("file"),
+    MAIL_TRANSPORT: z.enum(["file", "smtp", "mailersend"]).default("file"),
     MAIL_FROM: z.string().email().default("noctis@localhost.invalid"),
+    MAILERSEND_API_TOKEN: z.string().default(""),
     SMTP_HOST: z.string().default(""),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
     SMTP_USER: z.string().default(""),
@@ -105,16 +106,17 @@ if (config.STORAGE_DRIVER === "r2") {
       "Configure a private R2 bucket and server-side S3 credentials.",
     );
 }
-if (production && config.MAIL_TRANSPORT !== "smtp")
-  throw new Error("Production requires SMTP email delivery.");
+if (production && config.MAIL_TRANSPORT === "file")
+  throw new Error("Production requires external email delivery.");
 if (
   production &&
   (config.MAIL_FROM.endsWith(".invalid") ||
-    !config.SMTP_USER ||
-    !config.SMTP_PASSWORD)
+    (config.MAIL_TRANSPORT === "smtp" &&
+      (!config.SMTP_USER || !config.SMTP_PASSWORD)) ||
+    (config.MAIL_TRANSPORT === "mailersend" && !config.MAILERSEND_API_TOKEN))
 )
   throw new Error(
-    "Production requires a verified mail sender and SMTP credentials.",
+    "Production requires a mail sender and delivery credentials.",
   );
 if (
   production &&

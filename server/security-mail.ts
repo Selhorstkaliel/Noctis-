@@ -31,12 +31,12 @@ export async function queueAccountToken(
     to: email,
     subject:
       purpose === "verify"
-        ? "Noctis â€” Verify your email / Confirme seu e-mail"
-        : "Noctis â€” Reset your password / Redefina sua senha",
+        ? "Noctis — Verify your email / Confirme seu e-mail"
+        : "Noctis — Reset your password / Redefina sua senha",
     text:
       purpose === "verify"
-        ? `Confirm your email within 60 minutes. / Confirme seu e-mail em atÃ© 60 minutos:\n\n${link}\n\nIf you did not create this account, ignore this message. / Se vocÃª nÃ£o criou esta conta, ignore esta mensagem.`
-        : `Reset your password within 20 minutes. / Redefina sua senha em atÃ© 20 minutos:\n\n${link}\n\nYour authenticator or recovery code is still required if two-factor authentication is enabled. / Se a autenticaÃ§Ã£o em duas etapas estiver ativa, vocÃª ainda precisarÃ¡ do autenticador ou de um cÃ³digo de recuperaÃ§Ã£o.\n\nIf you did not request this, ignore this message. / Se vocÃª nÃ£o fez esta solicitaÃ§Ã£o, ignore esta mensagem.`,
+        ? `Confirm your email within 60 minutes. / Confirme seu e-mail em até 60 minutos:\n\n${link}\n\nIf you did not create this account, ignore this message. / Se você não criou esta conta, ignore esta mensagem.`
+        : `Reset your password within 20 minutes. / Redefina sua senha em até 20 minutos:\n\n${link}\n\nYour authenticator or recovery code is still required if two-factor authentication is enabled. / Se a autenticação em duas etapas estiver ativa, você ainda precisará do autenticador ou de um código de recuperação.\n\nIf you did not request this, ignore this message. / Se você não fez esta solicitação, ignore esta mensagem.`,
   });
 }
 const smtp =
@@ -58,6 +58,36 @@ const smtp =
       })
     : undefined;
 
+async function sendWithMailerSend(mail: Mail) {
+  const response = await fetch("https://api.mailersend.com/v1/email", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.MAILERSEND_API_TOKEN}`,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      from: { email: config.MAIL_FROM, name: "Noctis" },
+      to: [{ email: mail.to }],
+      subject: mail.subject,
+      text: mail.text,
+    }),
+    redirect: "error",
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) {
+    const detail = (await response.text())
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+      .slice(0, 300);
+    throw Object.assign(new Error("MailerSend API rejected the message."), {
+      code: "EMAIL_API",
+      responseCode: response.status,
+      command: "POST",
+      response: detail,
+    });
+  }
+}
+
 export async function deliverSecurityMail() {
   const db = await workerPool.connect();
   try {
@@ -74,7 +104,9 @@ export async function deliverSecurityMail() {
       const mail = JSON.parse(
         decrypt(row.payload_encrypted, `mail:${row.id}`),
       ) as Mail;
-      if (smtp)
+      if (config.MAIL_TRANSPORT === "mailersend")
+        await sendWithMailerSend(mail);
+      else if (smtp)
         await smtp.sendMail({
           ...mail,
           from: config.MAIL_FROM,
@@ -125,4 +157,3 @@ export async function deliverSecurityMail() {
     db.release();
   }
 }
-
