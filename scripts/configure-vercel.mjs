@@ -30,7 +30,7 @@ export function vercelFrontendConfig(value) {
     "font-src 'self'",
     "img-src 'self' blob: data:",
     "media-src 'self' blob:",
-    "connect-src 'self'",
+    `connect-src 'self' ${backend.origin.replace(/^https:/, "wss:")}`,
     "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com",
     "object-src 'none'",
     "base-uri 'self'",
@@ -91,3 +91,4 @@ if (
     "Created vercel.json. Review the backend, then commit the public routing configuration.",
   );
 }
+

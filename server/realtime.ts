@@ -18,10 +18,10 @@ import {
   sessionLive,
   throttle,
 } from "./auth.js";
-import { equal } from "./crypto.js";
+import { decrypt, encrypt, equal } from "./crypto.js";
 import { channel, member, conversation, permit } from "./authorization.js";
 import { id, requireThat } from "./errors.js";
-import { config } from "./config.js";
+import { config, publicWebSocketUrl } from "./config.js";
 import {
   mediaRoom,
   prepareMediaRoom,
@@ -54,6 +54,13 @@ const frame = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+const realtimeTicket = z
+  .object({
+    userId: id,
+    sessionId: id,
+    expiresAt: z.number().int(),
+  })
+  .strict();
 const musicNotification = z
   .object({
     serverId: id,
@@ -191,6 +198,20 @@ async function revalidate(p: Peer) {
   return true;
 }
 export async function realtimeRoutes(app: FastifyInstance) {
+  app.get("/api/realtime/ticket", async (req) => {
+    await throttle("realtime-ticket", req.identity.userId, 30, 60);
+    requireThat(await sessionLive(req.identity), 401, "Session expired.");
+    return {
+      url: publicWebSocketUrl("/api/realtime"),
+      ticket: encrypt(
+        JSON.stringify({
+          ...req.identity,
+          expiresAt: Date.now() + 30_000,
+        }),
+        "realtime-ticket",
+      ),
+    };
+  });
   let stopping = false;
   let listener: DB | undefined;
   let reconnect: ReturnType<typeof setTimeout> | undefined;
@@ -389,7 +410,43 @@ export async function realtimeRoutes(app: FastifyInstance) {
           "Live updates are reconnecting. Please try again.",
         );
         verifyOrigin(req);
-        req.identity = await authenticate(req);
+        const supplied = new URL(req.url, config.APP_ORIGIN).searchParams.get(
+          "access_token",
+        );
+        if (supplied) {
+          requireThat(
+            supplied.length < 2048,
+            401,
+            "Connection ticket is invalid.",
+          );
+          try {
+            const ticket = realtimeTicket.parse(
+              JSON.parse(decrypt(supplied, "realtime-ticket")),
+            );
+            requireThat(
+              ticket.expiresAt >= Date.now() &&
+                ticket.expiresAt <= Date.now() + 35_000,
+              401,
+              "Connection ticket has expired.",
+            );
+            req.identity = {
+              userId: ticket.userId,
+              sessionId: ticket.sessionId,
+            };
+            requireThat(
+              await sessionLive(req.identity),
+              401,
+              "Session expired.",
+            );
+          } catch (error) {
+            if ((error as { statusCode?: number }).statusCode) throw error;
+            throw Object.assign(new Error("Connection ticket is invalid."), {
+              statusCode: 401,
+            });
+          }
+        } else {
+          req.identity = await authenticate(req);
+        }
         await throttle("ws-connect", req.identity.userId, 20, 60);
         requireThat(
           (subscribers.get(`user:${req.identity.userId}`)?.size || 0) < 8,
@@ -535,8 +592,7 @@ export async function realtimeRoutes(app: FastifyInstance) {
                     connectionId: p.id,
                     media: {
                       transport: "sfu",
-                      url:
-                        config.APP_ORIGIN.replace(/^http/, "ws") + "/api/media",
+                      url: publicWebSocketUrl("/api/media"),
                       token,
                     },
                     participants: list,
@@ -755,3 +811,4 @@ export async function realtimeRoutes(app: FastifyInstance) {
     }
   });
 }
+

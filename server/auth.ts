@@ -591,6 +591,11 @@ export async function authHook(req: FastifyRequest) {
   const path = req.url.split("?")[0];
   if (
     !path.startsWith("/api/") ||
+    path === "/api/realtime" ||
+    path === "/api/media/rtc" ||
+    path === "/api/media/rtc/v1" ||
+    path === "/api/media/rtc/validate" ||
+    path === "/api/media/rtc/v1/validate" ||
     [
       "/api/health",
       "/api/ready",
@@ -629,3 +634,4 @@ export async function authHook(req: FastifyRequest) {
     );
   }
 }
+

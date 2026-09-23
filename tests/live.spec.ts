@@ -615,7 +615,7 @@ test("settings save on the server and devices show active sessions", async ({
   const connectPolicy = headers["content-security-policy"]
     .split(";")
     .find((directive) => directive.trim().startsWith("connect-src"))!;
-  expect(connectPolicy.trim()).toBe("connect-src 'self'");
+  expect(connectPolicy.trim()).toContain("connect-src 'self' wss://");
   // Vite does not serve Helmet headers. Exercise the server's real connection
   // policy on both navigation and reload, without blocking Vite's inline setup.
   await page.route("**/", async (route) => {
@@ -1430,3 +1430,4 @@ test("desktop and mobile authenticated screens have no serious accessibility vio
     fullPage: true,
   });
 });
+

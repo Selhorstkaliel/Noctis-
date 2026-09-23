@@ -146,3 +146,11 @@ const storageRelative = relative(resolve("."), resolve(config.STORAGE_PATH));
 if (!storageRelative.startsWith("..") && !isAbsolute(storageRelative))
   throw new Error("Storage must be outside the application directory.");
 export const cookieName = production ? "__Host-noctis" : "noctis_session";
+export function publicWebSocketUrl(path: string) {
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  const origin = railwayDomain ? `https://${railwayDomain}` : config.APP_ORIGIN;
+  const url = new URL(path, origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+

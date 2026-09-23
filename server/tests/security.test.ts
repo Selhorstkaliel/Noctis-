@@ -725,6 +725,30 @@ function frame(ws: WebSocket, predicate: (v: any) => boolean, timeout = 8000) {
     ws.on("message", handler);
   });
 }
+test("short-lived realtime tickets connect without exposing the session cookie", async () => {
+  const issued = await request(member, "GET", "/realtime/ticket");
+  assert.equal(issued.status, 200, JSON.stringify(issued.data));
+  assert.match(issued.data.url, /^wss?:\/\//);
+  assert.ok(
+    typeof issued.data.ticket === "string" && issued.data.ticket.length > 40,
+  );
+  const target = new URL(issued.data.url);
+  target.hostname = new URL(address).hostname;
+  target.port = new URL(address).port;
+  target.protocol = "ws:";
+  target.searchParams.set("access_token", issued.data.ticket);
+  const ws = new WebSocket(target, {
+    headers: { Origin: process.env.APP_ORIGIN! },
+  });
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", resolve);
+    ws.once("error", reject);
+  });
+  const ready = frame(ws, (value) => value.type === "ready");
+  ws.send(JSON.stringify({ type: "auth", csrf: member.csrf }));
+  await ready;
+  ws.close();
+});
 test("live voice permissions revoke transmission and moderation removes the old room membership", async () => {
   const ws = connect(member);
   await new Promise<void>((resolve, reject) => {
@@ -740,7 +764,11 @@ test("live voice permissions revoke transmission and moderation removes the old 
   const connectionId = admission.connectionId;
   const validationPath = `/media/rtc/validate?access_token=${encodeURIComponent(admission.media.token)}`;
   assert.equal((await request(member, "GET", validationPath)).status, 200);
-  assert.equal((await request(outsider, "GET", validationPath)).status, 403);
+  assert.equal((await request(undefined, "GET", validationPath)).status, 200);
+  assert.equal(
+    (await request(undefined, "GET", `${validationPath.slice(0, -1)}x`)).status,
+    401,
+  );
   const transmitting = frame(
     ws,
     (v) =>
@@ -1056,3 +1084,4 @@ test("WebSocket origin, private subscriptions, voice room membership, and revoke
   assert.equal(await closed, 4401);
   assert.equal((await request(owner, "GET", "/bootstrap")).status, 401);
 });
+

@@ -11,7 +11,7 @@ import { config } from "./config.js";
 import { transaction, workerPool, type DB, type Identity } from "./db.js";
 import { channel } from "./authorization.js";
 import { requireThat } from "./errors.js";
-import { verifyOrigin, throttle } from "./auth.js";
+import { verifyOrigin, throttle, sessionLive } from "./auth.js";
 import { RealtimeQueue } from "./realtime-queue.js";
 
 export const mediaRoom = (channelId: string) =>
@@ -194,10 +194,24 @@ async function authorize(req: FastifyRequest): Promise<Access> {
     "Voice authorization is unavailable.",
   );
   const connectionId = claims.sub;
-  return transaction(req.identity, async (db) => {
+  const participant = await workerPool.query(
+    "SELECT user_id,session_id,channel_id,media_room FROM voice_participants WHERE connection_id=$1 AND updated_at>now()-interval '2 minutes'",
+    [connectionId],
+  );
+  requireThat(
+    participant.rowCount,
+    403,
+    "Join the voice room before connecting media.",
+  );
+  const identity: Identity = {
+    userId: participant.rows[0].user_id,
+    sessionId: participant.rows[0].session_id,
+  };
+  requireThat(await sessionLive(identity), 401, "Session expired.");
+  return transaction(identity, async (db) => {
     const result = await db.query(
       "SELECT channel_id,media_room FROM voice_participants WHERE connection_id=$1 AND user_id=$2 AND session_id=$3 AND updated_at>now()-interval '2 minutes'",
-      [connectionId, req.identity.userId, req.identity.sessionId],
+      [connectionId, identity.userId, identity.sessionId],
     );
     requireThat(
       result.rowCount,
@@ -217,7 +231,7 @@ async function authorize(req: FastifyRequest): Promise<Access> {
       await mediaRights(db, r.channel_id, connectionId),
     );
     return {
-      identity: req.identity,
+      identity,
       connectionId,
       channelId: r.channel_id,
       room: r.media_room,
@@ -281,8 +295,13 @@ export async function mediaRoutes(app: FastifyInstance) {
         websocket: true,
         preValidation: async (req) => {
           verifyOrigin(req);
-          await throttle("media-connect", req.identity.userId, 30, 60);
           req.mediaAccess = await authorize(req);
+          await throttle(
+            "media-connect",
+            req.mediaAccess.identity.userId,
+            30,
+            60,
+          );
         },
       },
       (browser, req) => {
@@ -376,3 +395,4 @@ export async function mediaRoutes(app: FastifyInstance) {
     for (const b of bridges) close(b);
   });
 }
+
