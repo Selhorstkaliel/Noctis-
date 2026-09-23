@@ -41,7 +41,13 @@ export async function createServer(
   serverId = randomUUID(),
 ) {
   await db.query(
-    "INSERT INTO servers(id,owner_id,name,description,category,mark,is_public) VALUES($1,$2,$3,$4,$5,$6,$7)",
+    `WITH created AS (
+       INSERT INTO servers(id,owner_id,name,description,category,mark,is_public)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id
+     )
+     INSERT INTO server_members(server_id,user_id)
+     SELECT id,$2 FROM created`,
     [
       serverId,
       userId,
@@ -57,16 +63,12 @@ export async function createServer(
       input.isPublic,
     ],
   );
-  await db.query(
-    "INSERT INTO server_members(server_id,user_id) VALUES($1,$2)",
-    [serverId, userId],
-  );
-  for (const [name, position, perms] of [
-    ["Member", 0, memberPermissions],
-    [
-      "Moderator",
-      20,
-      [
+  const roleDefinitions = [
+    { name: "Member", position: 0, permissions: memberPermissions },
+    {
+      name: "Moderator",
+      position: 20,
+      permissions: [
         ...memberPermissions,
         "MANAGE_MESSAGES",
         "MUTE_MEMBERS",
@@ -80,51 +82,89 @@ export async function createServer(
         "MUSIC_QUEUE_MANAGE",
         "MUSIC_MOVE",
       ],
-    ],
-    ["Admin", 50, permissions],
-  ] as const) {
-    const r = await db.query(
-      "INSERT INTO roles(server_id,name,position,is_default) VALUES($1,$2,$3,$4) RETURNING id",
-      [serverId, name, position, name === "Member"],
-    );
-    for (const p of perms)
-      await db.query("INSERT INTO role_permissions VALUES($1,$2)", [
-        r.rows[0].id,
-        p,
-      ]);
-  }
+    },
+    { name: "Admin", position: 50, permissions },
+  ];
+  const roleIds = roleDefinitions.map(() => randomUUID());
   await db.query(
-    "INSERT INTO music_settings(server_id) VALUES($1) ON CONFLICT DO NOTHING",
-    [serverId],
-  );
-  await db.query(
-    "INSERT INTO music_metrics(server_id) VALUES($1) ON CONFLICT DO NOTHING",
-    [serverId],
-  );
-  for (const [name, position, items] of [
+    `INSERT INTO roles(id,server_id,name,position,is_default)
+     SELECT role_id,$1,name,position,name='Member'
+     FROM unnest($2::text[],$3::text[],$4::integer[])
+       AS role(role_id,name,position)`,
     [
-      "Community",
-      0,
-      ["general", "introductions", "share-your-work", "inspiration"],
+      serverId,
+      roleIds,
+      roleDefinitions.map((role) => role.name),
+      roleDefinitions.map((role) => role.position),
     ],
-    ["Voice", 1, ["lounge"]],
-  ] as const) {
-    const r = await db.query(
-      "INSERT INTO channel_categories(server_id,name,position) VALUES($1,$2,$3) RETURNING id",
-      [serverId, name, position],
-    );
-    for (const [index, slug] of items.entries())
-      await db.query(
-        "INSERT INTO channels(server_id,category_id,name,slug,kind,position) VALUES($1,$2,$3,$3,$4,$5)",
-        [
-          serverId,
-          r.rows[0].id,
-          slug,
-          name === "Voice" ? "voice" : "text",
-          position * 10 + index,
-        ],
-      );
-  }
+  );
+  const rolePermissionRows = roleDefinitions.flatMap((role, index) =>
+    role.permissions.map((permission) => ({
+      roleId: roleIds[index],
+      permission,
+    })),
+  );
+  await db.query(
+    `INSERT INTO role_permissions(role_id,permission)
+     SELECT * FROM unnest($1::text[],$2::text[])`,
+    [
+      rolePermissionRows.map((row) => row.roleId),
+      rolePermissionRows.map((row) => row.permission),
+    ],
+  );
+  await db.query(
+    `WITH settings AS (
+       INSERT INTO music_settings(server_id) VALUES($1)
+       ON CONFLICT DO NOTHING RETURNING server_id
+     )
+     INSERT INTO music_metrics(server_id)
+     SELECT server_id FROM settings ON CONFLICT DO NOTHING`,
+    [serverId],
+  );
+  const categories = [
+    {
+      id: randomUUID(),
+      name: "Community",
+      position: 0,
+      channels: ["general", "introductions", "share-your-work", "inspiration"],
+    },
+    { id: randomUUID(), name: "Voice", position: 1, channels: ["lounge"] },
+  ];
+  await db.query(
+    `INSERT INTO channel_categories(id,server_id,name,position)
+     SELECT category_id,$1,name,position
+     FROM unnest($2::text[],$3::text[],$4::integer[])
+       AS category(category_id,name,position)`,
+    [
+      serverId,
+      categories.map((category) => category.id),
+      categories.map((category) => category.name),
+      categories.map((category) => category.position),
+    ],
+  );
+  const channels = categories.flatMap((category) =>
+    category.channels.map((slug, index) => ({
+      id: randomUUID(),
+      categoryId: category.id,
+      slug,
+      kind: category.name === "Voice" ? "voice" : "text",
+      position: category.position * 10 + index,
+    })),
+  );
+  await db.query(
+    `INSERT INTO channels(id,server_id,category_id,name,slug,kind,position)
+     SELECT channel_id,$1,category_id,slug,slug,kind,position
+     FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::integer[])
+       AS channel(channel_id,category_id,slug,kind,position)`,
+    [
+      serverId,
+      channels.map((channel) => channel.id),
+      channels.map((channel) => channel.categoryId),
+      channels.map((channel) => channel.slug),
+      channels.map((channel) => channel.kind),
+      channels.map((channel) => channel.position),
+    ],
+  );
   await audit(db, userId, "server.created", serverId, serverId);
   await changed(db, `user:${userId}`);
   return serverId;
@@ -881,3 +921,4 @@ export async function communityRoutes(app: FastifyInstance) {
     }),
   );
 }
+
