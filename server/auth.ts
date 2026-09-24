@@ -91,6 +91,71 @@ export async function authenticate(
     );
   return { userId, sessionId };
 }
+async function authenticateApiRequest(
+  request: Pick<FastifyRequest, "cookies">,
+): Promise<Identity> {
+  const raw = request.cookies[cookieName];
+  requireThat(
+    raw && /^[\w-]{43}$/.test(raw),
+    401,
+    "Please sign in to continue.",
+  );
+  const result = await authPool.query(
+    `WITH authenticated AS MATERIALIZED (
+       SELECT s.id,s.user_id,s.last_seen_at,u.email_verified_at
+       FROM sessions s
+       JOIN users u ON u.id=s.user_id
+       LEFT JOIN account_mfa m
+         ON m.user_id=u.id AND m.enabled_at IS NOT NULL
+       WHERE s.token_hash=$1
+         AND s.revoked_at IS NULL
+         AND s.expires_at>now()
+         AND s.last_seen_at>now()-interval '7 days'
+         AND u.deleted_at IS NULL
+         AND (m.user_id IS NULL OR s.mfa_verified_at>=m.enabled_at)
+     ), touched AS (
+       UPDATE sessions s SET last_seen_at=now()
+       FROM authenticated a
+       WHERE s.id=a.id AND a.last_seen_at<now()-interval '5 minutes'
+       RETURNING s.id
+     ), limited AS (
+       INSERT INTO rate_limits(bucket)
+       SELECT $2 FROM authenticated
+       ON CONFLICT(bucket) DO UPDATE SET
+         hits=CASE
+           WHEN rate_limits.window_start<now()-interval '60 seconds' THEN 1
+           ELSE rate_limits.hits+1
+         END,
+         window_start=CASE
+           WHEN rate_limits.window_start<now()-interval '60 seconds' THEN now()
+           ELSE rate_limits.window_start
+         END
+       RETURNING hits
+     )
+     SELECT a.id,a.user_id,a.email_verified_at,l.hits
+     FROM authenticated a CROSS JOIN limited l`,
+    [hash(raw), keyed(`api-session:${raw}`)],
+  );
+  requireThat(
+    result.rowCount,
+    401,
+    "Your session has expired. Please sign in.",
+  );
+  requireThat(
+    result.rows[0].email_verified_at,
+    403,
+    "Verify your email before continuing.",
+  );
+  if (result.rows[0].hits > 600)
+    throw new HttpError(
+      429,
+      "Too many attempts. Please wait before trying again.",
+    );
+  return {
+    userId: result.rows[0].user_id,
+    sessionId: result.rows[0].id,
+  };
+}
 export async function sessionLive(identity: Identity) {
   const r = await authPool.query(
     "SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN account_mfa m ON m.user_id=u.id AND m.enabled_at IS NOT NULL WHERE s.id=$1 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND s.last_seen_at>now()-interval '7 days' AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL AND (m.user_id IS NULL OR s.mfa_verified_at>=m.enabled_at)",
@@ -611,19 +676,12 @@ export async function authHook(req: FastifyRequest) {
     path.startsWith("/api/webhooks/incoming/")
   )
     return;
-  req.identity = await authenticate(req);
-  if (!path.startsWith("/api/auth/")) {
-    const user = await authPool.query(
-      "SELECT email_verified_at FROM users WHERE id=$1",
-      [req.identity.userId],
-    );
-    requireThat(
-      user.rows[0]?.email_verified_at,
-      403,
-      "Verify your email before continuing.",
-    );
+  if (path.startsWith("/api/auth/")) {
+    req.identity = await authenticate(req);
+    await throttle("api", req.identity.userId, 600, 60);
+  } else {
+    req.identity = await authenticateApiRequest(req);
   }
-  await throttle("api", req.identity.userId, 600, 60);
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
     verifyOrigin(req);
     const supplied = req.headers["x-csrf-token"];

@@ -1,31 +1,43 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { transaction, type DB } from "../db.js";
-import { member, room, channel, conversation } from "../authorization.js";
+import { member, room, channel } from "../authorization.js";
 import { requireThat, id, page } from "../errors.js";
 import { throttle } from "../auth.js";
 export async function resolveRoom(db: DB, key: string) {
   if (key.startsWith("dm/")) {
     const target = key.slice(3);
-    let r = await db.query("SELECT id FROM direct_conversations WHERE id=$1", [
-      target,
-    ]);
-    if (!r.rowCount)
-      r = await db.query(
-        `SELECT c.id FROM direct_conversations c JOIN direct_conversation_members m ON m.conversation_id=c.id WHERE c.name IS NULL AND m.user_id=$1 AND noctis.in_conversation(c.id) AND (SELECT count(*) FROM direct_conversation_members x WHERE x.conversation_id=c.id)=2 LIMIT 1`,
-        [target],
-      );
+    const r = await db.query(
+      `SELECT candidate.id
+       FROM (
+         SELECT c.id,0 AS priority
+         FROM direct_conversations c
+         WHERE c.id=$1
+         UNION ALL
+         SELECT c.id,1 AS priority
+         FROM direct_conversations c
+         JOIN direct_conversation_members m ON m.conversation_id=c.id
+         WHERE c.name IS NULL
+           AND m.user_id=$1
+           AND (SELECT count(*) FROM direct_conversation_members x WHERE x.conversation_id=c.id)=2
+       ) candidate
+       WHERE noctis.in_conversation(candidate.id)
+       ORDER BY candidate.priority
+       LIMIT 1`,
+      [target],
+    );
     requireThat(r.rowCount);
-    await conversation(db, r.rows[0].id);
     return { conversationId: r.rows[0].id as string };
   }
   const [server, slug] = key.split("/");
   const r = await db.query(
-    "SELECT id FROM channels WHERE server_id=$1 AND slug=$2 AND deleted_at IS NULL",
+    `SELECT id,noctis.channel_permission(id,'VIEW_CHANNEL') AS allowed
+     FROM channels
+     WHERE server_id=$1 AND slug=$2 AND deleted_at IS NULL`,
     [server, slug],
   );
   requireThat(r.rowCount);
-  await channel(db, r.rows[0].id);
+  requireThat(r.rows[0].allowed, 403, "Your role does not allow this action.");
   return { channelId: r.rows[0].id as string };
 }
 export async function messageDTO(
@@ -35,33 +47,41 @@ export async function messageDTO(
 ) {
   if (!rows.length) return [];
   const ids = rows.map((m) => m.id);
-  const reactions = (
+  const metadata = (
     await db.query(
-      "SELECT message_id,emoji,count(*)::int AS count,bool_or(user_id=$2) AS mine FROM message_reactions WHERE message_id=ANY($1) GROUP BY message_id,emoji",
+      `SELECT
+         coalesce((SELECT jsonb_agg(to_jsonb(x)) FROM (
+           SELECT message_id,emoji,count(*)::int AS count,bool_or(user_id=$2) AS mine
+           FROM message_reactions WHERE message_id=ANY($1)
+           GROUP BY message_id,emoji
+         ) x),'[]'::jsonb) AS reactions,
+         coalesce((SELECT jsonb_agg(to_jsonb(x)) FROM (
+           SELECT ma.message_id,u.id,u.original_name,u.content_type
+           FROM message_attachments ma JOIN uploads u ON u.id=ma.upload_id
+           WHERE ma.message_id=ANY($1)
+         ) x),'[]'::jsonb) AS attachments,
+         coalesce((SELECT jsonb_agg(to_jsonb(x)) FROM (
+           SELECT r.message_id,r.parent_id,m.body,p.name
+           FROM message_replies r
+           JOIN messages m ON m.id=r.parent_id
+           LEFT JOIN profiles p ON p.user_id=m.author_id
+           WHERE r.message_id=ANY($1)
+         ) x),'[]'::jsonb) AS replies,
+         coalesce((SELECT jsonb_agg(to_jsonb(x)) FROM (
+           SELECT message_id FROM pinned_messages WHERE message_id=ANY($1)
+         ) x),'[]'::jsonb) AS pins`,
       [ids, userId],
     )
-  ).rows;
-  const attachments = (
-    await db.query(
-      "SELECT ma.message_id,u.id,u.original_name,u.content_type FROM message_attachments ma JOIN uploads u ON u.id=ma.upload_id WHERE ma.message_id=ANY($1)",
-      [ids],
-    )
-  ).rows;
-  const replies = (
-    await db.query(
-      "SELECT r.message_id,r.parent_id,m.body,p.name FROM message_replies r JOIN messages m ON m.id=r.parent_id LEFT JOIN profiles p ON p.user_id=m.author_id WHERE r.message_id=ANY($1)",
-      [ids],
-    )
-  ).rows;
-  const pins = (
-    await db.query(
-      "SELECT message_id FROM pinned_messages WHERE message_id=ANY($1)",
-      [ids],
-    )
-  ).rows;
+  ).rows[0];
+  const reactions = metadata.reactions as Record<string, any>[];
+  const attachments = metadata.attachments as Record<string, any>[];
+  const replies = metadata.replies as Record<string, any>[];
+  const pins = metadata.pins as Record<string, any>[];
   return rows.map((m) => {
     const a = attachments.filter((a) => a.message_id === m.id);
     const reply = replies.find((r) => r.message_id === m.id);
+    const image = a.find((u) => u.content_type.startsWith("image/"));
+    const file = a.find((u) => !u.content_type.startsWith("image/"));
     return {
       id: m.id,
       room: m.room,
@@ -83,14 +103,11 @@ export async function messageDTO(
         ? `${reply.name || "Member"}: ${reply.body.slice(0, 120)}`
         : undefined,
       replyTo: reply?.parent_id,
-      image: a.find((u) => u.content_type.startsWith("image/"))
-        ? `/api/uploads/${a.find((u) => u.content_type.startsWith("image/")).id}`
-        : undefined,
-      file: a.find((u) => !u.content_type.startsWith("image/"))
+      image: image ? `/api/uploads/${image.id}` : undefined,
+      file: file
         ? {
-            name: a.find((u) => !u.content_type.startsWith("image/"))
-              .original_name,
-            data: `/api/uploads/${a.find((u) => !u.content_type.startsWith("image/")).id}`,
+            name: file.original_name,
+            data: `/api/uploads/${file.id}`,
           }
         : undefined,
       attachments: a.map((u) => ({
@@ -575,3 +592,4 @@ export async function readRoutes(app: FastifyInstance) {
     });
   });
 }
+
