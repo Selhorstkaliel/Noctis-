@@ -957,11 +957,23 @@ kbd {
 }
 .mini-voice-users {
   display: flex;
-  padding: 5px 10px 0 33px;
-  gap: 5px;
+  min-width: 0;
+  padding: 4px 10px 6px 33px;
+  gap: 7px;
   align-items: center;
 }
-.mini-voice-users > span:last-child {
+.mini-voice-users .avatar-stack {
+  flex-shrink: 0;
+}
+.mini-voice-users .avatar-stack > .avatar {
+  border-color: var(--surface);
+  box-shadow: 0 0 0 1px #00000020;
+}
+.mini-voice-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--subtle);
   font-size: 9px;
 }
@@ -8823,3 +8835,4 @@ kbd {
     gap: 12px;
   }
 }
+

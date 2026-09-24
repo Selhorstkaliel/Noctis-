@@ -166,7 +166,7 @@ export default function App() {
     ["mfa", "forgot-password", "verify-email", "reset-email"].includes(page) ||
     store.auth === "verification";
   useEffect(() => {
-    if (!securityRoute) document.title = `${title} — Noctis`;
+    if (!securityRoute) document.title = `${title} â€” Noctis`;
     setMobileNav(false);
     document.querySelector(".workspace")?.scrollTo(0, 0);
   }, [route, title, securityRoute]);
@@ -257,7 +257,7 @@ export default function App() {
             <Logo />
             <h1>
               {store.auth === "loading"
-                ? t("Finding your space…")
+                ? t("Finding your spaceâ€¦")
                 : t("Your space is temporarily out of reach.")}
             </h1>
             <p>{store.error || t("Connecting securely to Noctis.")}</p>
@@ -284,7 +284,7 @@ export default function App() {
           >
             <Icon name="Search" size={15} />
             <span>{t("Find your way")}</span>
-            <kbd>⌘ K</kbd>
+            <kbd>âŒ˜ K</kbd>
           </button>
           <nav aria-label={t("Main navigation")} className="main-nav">
             {mainNav.map((item) => (
@@ -351,37 +351,75 @@ export default function App() {
                     (c) =>
                       c.serverId === server?.id && c.categoryId === category.id,
                   )
-                  .map((c) => (
-                    <a
-                      key={c.id}
-                      className={`channel-link ${parts[2] === c.slug ? "selected" : ""}`}
-                      href={`#/${c.kind === "voice" ? "voice" : "server"}/${c.serverId}/${c.slug}`}
-                    >
-                      <Icon
-                        name={
-                          c.kind === "voice"
-                            ? "Volume2"
-                            : c.isPrivate
-                              ? "Lock"
-                              : "Hash"
-                        }
-                        size={16}
-                      />
-                      {c.name}
-                      {c.kind === "voice" ? (
-                        <span className="voice-count">
-                          {
-                            store.voice.filter((v) => v.channelId === c.id)
-                              .length
-                          }
-                        </span>
-                      ) : (
-                        c.unread > 0 && (
-                          <span className="nav-count">{c.unread}</span>
-                        )
-                      )}
-                    </a>
-                  ))}
+                  .map((c) => {
+                    const voicePeople = [
+                      ...new Map(
+                        store.voice
+                          .filter((voice) => voice.channelId === c.id)
+                          .map((voice) => [
+                            voice.userId,
+                            voice.userId === store.profile.id
+                              ? store.profile
+                              : getUser(voice.userId),
+                          ]),
+                      ).values(),
+                    ];
+                    const visibleNames = voicePeople
+                      .slice(0, 2)
+                      .map((person) => person.name)
+                      .join(", ");
+                    return (
+                      <div className="channel-entry" key={c.id}>
+                        <a
+                          className={`channel-link ${parts[2] === c.slug ? "selected" : ""}`}
+                          href={`#/${c.kind === "voice" ? "voice" : "server"}/${c.serverId}/${c.slug}`}
+                        >
+                          <Icon
+                            name={
+                              c.kind === "voice"
+                                ? "Volume2"
+                                : c.isPrivate
+                                  ? "Lock"
+                                  : "Hash"
+                            }
+                            size={16}
+                          />
+                          {c.name}
+                          {c.kind === "voice" ? (
+                            <span className="voice-count">
+                              {voicePeople.length}
+                            </span>
+                          ) : (
+                            c.unread > 0 && (
+                              <span className="nav-count">{c.unread}</span>
+                            )
+                          )}
+                        </a>
+                        {c.kind === "voice" && voicePeople.length > 0 && (
+                          <div
+                            className="mini-voice-users"
+                            aria-label={`${c.name}: ${voicePeople.map((person) => person.name).join(", ")}`}
+                          >
+                            <span className="avatar-stack">
+                              {voicePeople.slice(0, 3).map((person) => (
+                                <Avatar
+                                  key={person.id}
+                                  user={person}
+                                  size={22}
+                                  status={false}
+                                />
+                              ))}
+                            </span>
+                            <span className="mini-voice-names">
+                              {visibleNames}
+                              {voicePeople.length > 2 &&
+                                ` +${voicePeople.length - 2}`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             ))}
         </div>
@@ -748,3 +786,4 @@ export default function App() {
     </UIContext.Provider>
   );
 }
+
