@@ -3,6 +3,7 @@ import {
   Avatar,
   Badge,
   Button,
+  Dialog,
   EmptyState,
   Icon,
   IconButton,
@@ -141,7 +142,7 @@ function ScreenTile({
       ) : (
         <div className="screen-share-loading">
           <Icon name="Monitor" size={32} />
-          <span>Connecting to streamâ€¦</span>
+          <span>Connecting to streamÃ¢â‚¬Â¦</span>
         </div>
       )}
       <div className="screen-share-tile-bar">
@@ -188,6 +189,7 @@ export function Voice({
   const [deafened, setDeafened] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [screenPrompt, setScreenPrompt] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const active = useRef(true);
   const connection = useRef("");
@@ -331,8 +333,8 @@ export function Voice({
           }
           if (self?.canStream === false) {
             for (const key of ["camera", "screen"] as const) {
-              const track = streams.current[key]?.getTracks()[0];
-              if (track) void call.current?.unpublish(track);
+              for (const track of streams.current[key]?.getTracks() || [])
+                void call.current?.unpublish(track);
               stopStream(streams.current[key]);
               delete streams.current[key];
               state.current[key] = false;
@@ -387,14 +389,17 @@ export function Voice({
     const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(timer);
   }, [joined]);
-  const capture = async (key: "audio" | "camera" | "screen") => {
+  const capture = async (
+    key: "audio" | "camera" | "screen",
+    shareAudio = false,
+  ) => {
     if (!joined) return;
     setBusy(true);
     setError("");
     try {
       if (streams.current[key] && key !== "audio") {
-        const track = streams.current[key]!.getTracks()[0];
-        await call.current?.unpublish(track);
+        for (const track of streams.current[key]!.getTracks())
+          await call.current?.unpublish(track);
         stopStream(streams.current[key]);
         delete streams.current[key];
         state.current[key] = false;
@@ -417,7 +422,7 @@ export function Voice({
         key === "screen"
           ? await navigator.mediaDevices.getDisplayMedia({
               video: true,
-              audio: false,
+              audio: shareAudio,
             })
           : await navigator.mediaDevices.getUserMedia(
               key === "audio"
@@ -438,11 +443,20 @@ export function Voice({
         stopStream(media);
         return;
       }
-      const track = media.getTracks()[0];
+      const track =
+        key === "screen" ? media.getVideoTracks()[0] : media.getTracks()[0];
+      if (!track) throw new Error("The selected source cannot be shared.");
+      const displayAudio =
+        key === "screen" ? media.getAudioTracks()[0] : undefined;
       try {
         if (!call.current) throw new Error("Rejoin the voice room.");
         await call.current.publish(key, track);
+        if (displayAudio)
+          await call.current.publish("screenAudio", displayAudio);
       } catch (error) {
+        await call.current?.unpublish(track).catch(() => {});
+        if (displayAudio)
+          await call.current?.unpublish(displayAudio).catch(() => {});
         stopStream(media);
         throw error;
       }
@@ -463,12 +477,25 @@ export function Voice({
           state.current.muted = true;
           setMuted(true);
         } else state.current[key] = false;
-        void call.current?.unpublish(track);
+        for (const published of media.getTracks())
+          void call.current?.unpublish(published);
+        stopStream(media);
         setLocal({ ...streams.current });
         try {
           update();
         } catch {}
       };
+      if (displayAudio)
+        displayAudio.onended = () => {
+          void call.current?.unpublish(displayAudio);
+          media.removeTrack(displayAudio);
+        };
+      if (key === "screen" && shareAudio && !displayAudio)
+        setError(
+          t(
+            "This source does not provide audio. The screen is being shared without sound.",
+          ),
+        );
     } catch (e) {
       setError(
         (e as Error).name === "NotAllowedError"
@@ -524,17 +551,24 @@ export function Voice({
     <div className="voice-audio" aria-hidden="true">
       {participants
         .filter((p) => p.id !== connection.current)
-        .map((p) => (
+        .flatMap((p) => [
           <Media
-            key={p.id}
+            key={`${p.id}:microphone`}
             stream={remote[p.id]?.audio}
             video={false}
             muted={
               deafened || !!self?.serverDeafened || p.muted || p.serverMuted
             }
             volume={(participantVolumes[p.id] ?? 100) / 100}
-          />
-        ))}
+          />,
+          <Media
+            key={`${p.id}:screen`}
+            stream={remote[p.id]?.screenAudio}
+            video={false}
+            muted={deafened || !!self?.serverDeafened}
+            volume={(participantVolumes[p.id] ?? 100) / 100}
+          />,
+        ])}
       <Media
         stream={remote[`music:${server.id}`]?.audio}
         video={false}
@@ -592,7 +626,9 @@ export function Voice({
         name="ScreenShare"
         label={t(local.screen ? "Stop sharing screen" : "Share your screen")}
         disabled={!joined || busy || self?.canStream === false}
-        onClick={() => void capture("screen")}
+        onClick={() =>
+          local.screen ? void capture("screen") : setScreenPrompt(true)
+        }
       />
       <IconButton
         name="ShieldCheck"
@@ -628,8 +664,8 @@ export function Voice({
           <span>
             <strong>{channel.name}</strong>
             <small>
-              {server.name} · {participants.length}{" "}
-              {t(participants.length === 1 ? "person" : "people")} ·{" "}
+              {server.name} Â· {participants.length}{" "}
+              {t(participants.length === 1 ? "person" : "people")} Â·{" "}
               {String(Math.floor(seconds / 60)).padStart(2, "0")}:
               {String(seconds % 60).padStart(2, "0")}
             </small>
@@ -646,6 +682,57 @@ export function Voice({
   return (
     <>
       {audioOutput}
+      {screenPrompt && (
+        <Dialog
+          title={t("Share your screen")}
+          className="screen-share-choice-dialog"
+          closeLabel={t("Cancel screen sharing")}
+          onClose={() => setScreenPrompt(false)}
+        >
+          <p>
+            {t(
+              "Choose whether people in the call should also hear audio from the shared source.",
+            )}
+          </p>
+          <div className="screen-share-options">
+            <button
+              type="button"
+              onClick={() => {
+                setScreenPrompt(false);
+                void capture("screen", true);
+              }}
+            >
+              <Icon name="Volume2" size={22} />
+              <span>
+                <strong>{t("Share with sound")}</strong>
+                <small>
+                  {t("People will hear audio offered by the selected source.")}
+                </small>
+              </span>
+              <Icon name="ArrowRight" size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setScreenPrompt(false);
+                void capture("screen", false);
+              }}
+            >
+              <Icon name="VolumeX" size={22} />
+              <span>
+                <strong>{t("Share without sound")}</strong>
+                <small>{t("Only the screen image will be shared.")}</small>
+              </span>
+              <Icon name="ArrowRight" size={16} />
+            </button>
+          </div>
+          <p className="screen-share-audio-note">
+            {t(
+              "Audio availability depends on the browser and the window, tab, or screen you select next.",
+            )}
+          </p>
+        </Dialog>
+      )}
       {voiceDock}
       <main
         id={activeView ? "main-content" : undefined}
@@ -657,7 +744,7 @@ export function Voice({
         <div className="voice-page-heading">
           <div>
             <span className="eyebrow">
-              {server.name.toUpperCase()} · {t("VOICE SPACE")}
+              {server.name.toUpperCase()} Â· {t("VOICE SPACE")}
             </span>
             <h1>
               {channel.name === "lounge" ? t("The Lounge") : channel.name}
@@ -790,7 +877,7 @@ export function Voice({
               <small>
                 {joined
                   ? `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
-                  : "WebRTC · Secure signaling"}
+                  : "WebRTC Â· Secure signaling"}
               </small>
             </div>
           </div>
@@ -800,3 +887,4 @@ export function Voice({
     </>
   );
 }
+

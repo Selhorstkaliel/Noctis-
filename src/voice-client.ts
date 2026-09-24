@@ -10,12 +10,13 @@ import {
   type RemoteTrack,
 } from "livekit-client";
 
-export type MediaKind = "audio" | "camera" | "screen";
+export type MediaKind = "audio" | "camera" | "screen" | "screenAudio";
 export type Streams = Partial<Record<MediaKind, MediaStream>>;
 const source = {
   audio: Track.Source.Microphone,
   camera: Track.Source.Camera,
   screen: Track.Source.ScreenShare,
+  screenAudio: Track.Source.ScreenShareAudio,
 };
 const kind = (publication: RemoteTrackPublication): MediaKind | undefined =>
   publication.source === Track.Source.Microphone
@@ -24,7 +25,9 @@ const kind = (publication: RemoteTrackPublication): MediaKind | undefined =>
       ? "camera"
       : publication.source === Track.Source.ScreenShare
         ? "screen"
-        : undefined;
+        : publication.source === Track.Source.ScreenShareAudio
+          ? "screenAudio"
+          : undefined;
 
 /** Loaded only when a call starts. The SFU owns routing; no per-member RTCPeerConnection. */
 export class NoctisCall {
@@ -134,7 +137,8 @@ export class NoctisCall {
         const wanted =
           key === "audio" ||
           (key === "camera" && this.visible.has(user.identity)) ||
-          (key === "screen" && this.screens.has(user.identity));
+          ((key === "screen" || key === "screenAudio") &&
+            this.screens.has(user.identity));
         if (publication.isDesired !== wanted) publication.setSubscribed(wanted);
         if (wanted && key !== "audio")
           publication.setVideoQuality(
@@ -165,3 +169,4 @@ export class NoctisCall {
     void this.room.disconnect(true);
   }
 }
+

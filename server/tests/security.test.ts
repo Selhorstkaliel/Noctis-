@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { randomUUID, createHmac } from "node:crypto";
 import WebSocket from "ws";
+import { TrackSource } from "livekit-server-sdk";
 process.env.NODE_ENV = "test";
 const { buildApp } = await import("../app.js");
 const { apiPool, authPool, closePools, transaction } = await import("../db.js");
@@ -221,7 +222,7 @@ test("message editing, reactions, replies, pins, and soft deletion obey ownershi
   assert.equal(
     (
       await request(member, "PUT", `/messages/${a.data.id}/reactions`, {
-        emoji: "🔥",
+        emoji: "ðŸ”¥",
         active: true,
       })
     ).status,
@@ -762,6 +763,14 @@ test("live voice permissions revoke transmission and moderation removes the old 
   ws.send(JSON.stringify({ type: "voice.join", channelId: voiceId }));
   const admission = await joined;
   const connectionId = admission.connectionId;
+  const mediaGrant = JSON.parse(
+    Buffer.from(admission.media.token.split(".")[1], "base64url").toString(
+      "utf8",
+    ),
+  );
+  assert.ok(
+    mediaGrant.video.canPublishSources.includes(TrackSource.SCREEN_SHARE_AUDIO),
+  );
   const validationPath = `/media/rtc/validate?access_token=${encodeURIComponent(admission.media.token)}`;
   assert.equal((await request(member, "GET", validationPath)).status, 200);
   assert.equal((await request(undefined, "GET", validationPath)).status, 200);

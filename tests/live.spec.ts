@@ -1011,6 +1011,17 @@ test("a real WebRTC call stays active while reading messages and stops on explic
   await page
     .getByRole("button", { name: "Share your screen", exact: true })
     .click();
+  const screenChoice = page.getByRole("dialog", {
+    name: "Share your screen",
+  });
+  await expect(screenChoice).toBeVisible();
+  await expect(
+    screenChoice.getByRole("button", { name: /Share with sound/ }),
+  ).toBeVisible();
+  await expect(
+    screenChoice.getByRole("button", { name: /Share without sound/ }),
+  ).toBeVisible();
+  await screenChoice.getByRole("button", { name: /Share with sound/ }).click();
   await expect
     .poll(
       () =>
@@ -1031,6 +1042,10 @@ test("a real WebRTC call stays active while reading messages and stops on explic
   await expect(remoteScreen).not.toHaveClass(/expanded/);
   await receiver
     .getByRole("button", { name: "Share your screen", exact: true })
+    .click();
+  await receiver
+    .getByRole("dialog", { name: "Share your screen" })
+    .getByRole("button", { name: /Share without sound/ })
     .click();
   await expect(page.locator(".screen-share-tile")).toHaveCount(2);
   await expect(receiver.locator(".screen-share-tile")).toHaveCount(2);

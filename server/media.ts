@@ -81,7 +81,12 @@ export async function mediaRights(
   const r = result.rows[0];
   const sources: TrackSource[] = [];
   if (r.speak && !r.server_muted) sources.push(TrackSource.MICROPHONE);
-  if (r.stream) sources.push(TrackSource.CAMERA, TrackSource.SCREEN_SHARE);
+  if (r.stream)
+    sources.push(
+      TrackSource.CAMERA,
+      TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO,
+    );
   return {
     roomJoin: true,
     room: mediaRoom(cid),
