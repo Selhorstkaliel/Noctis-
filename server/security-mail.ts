@@ -31,12 +31,12 @@ export async function queueAccountToken(
     to: email,
     subject:
       purpose === "verify"
-        ? "Noctis — Verify your email / Confirme seu e-mail"
-        : "Noctis — Reset your password / Redefina sua senha",
+        ? "Noctis â€” Verify your email / Confirme seu e-mail"
+        : "Noctis â€” Reset your password / Redefina sua senha",
     text:
       purpose === "verify"
-        ? `Confirm your email within 60 minutes. / Confirme seu e-mail em até 60 minutos:\n\n${link}\n\nIf you did not create this account, ignore this message. / Se você não criou esta conta, ignore esta mensagem.`
-        : `Reset your password within 20 minutes. / Redefina sua senha em até 20 minutos:\n\n${link}\n\nYour authenticator or recovery code is still required if two-factor authentication is enabled. / Se a autenticação em duas etapas estiver ativa, você ainda precisará do autenticador ou de um código de recuperação.\n\nIf you did not request this, ignore this message. / Se você não fez esta solicitação, ignore esta mensagem.`,
+        ? `Confirm your email within 60 minutes. / Confirme seu e-mail em atÃ© 60 minutos:\n\n${link}\n\nIf you did not create this account, ignore this message. / Se vocÃª nÃ£o criou esta conta, ignore esta mensagem.`
+        : `Reset your password within 20 minutes. / Redefina sua senha em atÃ© 20 minutos:\n\n${link}\n\nYour authenticator or recovery code is still required if two-factor authentication is enabled. / Se a autenticaÃ§Ã£o em duas etapas estiver ativa, vocÃª ainda precisarÃ¡ do autenticador ou de um cÃ³digo de recuperaÃ§Ã£o.\n\nIf you did not request this, ignore this message. / Se vocÃª nÃ£o fez esta solicitaÃ§Ã£o, ignore esta mensagem.`,
   });
 }
 const smtp =
@@ -88,6 +88,31 @@ async function sendWithMailerSend(mail: Mail) {
   }
 }
 
+async function sendWithRelay(mail: Mail, messageId: string) {
+  const response = await fetch(config.MAIL_RELAY_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.MAIL_RELAY_SECRET}`,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({ ...mail, messageId }),
+    redirect: "error",
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!response.ok) {
+    const detail = (await response.text())
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+      .slice(0, 300);
+    throw Object.assign(new Error("Mail relay rejected the message."), {
+      code: "EMAIL_RELAY",
+      responseCode: response.status,
+      command: "POST",
+      response: detail,
+    });
+  }
+}
+
 export async function deliverSecurityMail() {
   const db = await workerPool.connect();
   try {
@@ -106,6 +131,8 @@ export async function deliverSecurityMail() {
       ) as Mail;
       if (config.MAIL_TRANSPORT === "mailersend")
         await sendWithMailerSend(mail);
+      else if (config.MAIL_TRANSPORT === "relay")
+        await sendWithRelay(mail, row.id);
       else if (smtp)
         await smtp.sendMail({
           ...mail,
@@ -157,3 +184,4 @@ export async function deliverSecurityMail() {
     db.release();
   }
 }
+

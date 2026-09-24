@@ -6,9 +6,13 @@ const env = z
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
-    MAIL_TRANSPORT: z.enum(["file", "smtp", "mailersend"]).default("file"),
+    MAIL_TRANSPORT: z
+      .enum(["file", "smtp", "mailersend", "relay"])
+      .default("file"),
     MAIL_FROM: z.string().email().default("noctis@localhost.invalid"),
     MAILERSEND_API_TOKEN: z.string().default(""),
+    MAIL_RELAY_URL: z.string().default(""),
+    MAIL_RELAY_SECRET: z.string().default(""),
     SMTP_HOST: z.string().default(""),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
     SMTP_USER: z.string().default(""),
@@ -113,7 +117,9 @@ if (
   (config.MAIL_FROM.endsWith(".invalid") ||
     (config.MAIL_TRANSPORT === "smtp" &&
       (!config.SMTP_USER || !config.SMTP_PASSWORD)) ||
-    (config.MAIL_TRANSPORT === "mailersend" && !config.MAILERSEND_API_TOKEN))
+    (config.MAIL_TRANSPORT === "mailersend" && !config.MAILERSEND_API_TOKEN) ||
+    (config.MAIL_TRANSPORT === "relay" &&
+      (!config.MAIL_RELAY_URL || config.MAIL_RELAY_SECRET.length < 32)))
 )
   throw new Error(
     "Production requires a mail sender and delivery credentials.",
@@ -134,6 +140,21 @@ if (
   throw new Error(
     "Configure SMTP_HOST and SMTP credentials before enabling email delivery.",
   );
+if (config.MAIL_TRANSPORT === "relay") {
+  let relayUrl: URL;
+  try {
+    relayUrl = new URL(config.MAIL_RELAY_URL);
+  } catch {
+    throw new Error("MAIL_RELAY_URL must be a valid HTTPS URL.");
+  }
+  if (
+    relayUrl.protocol !== "https:" ||
+    relayUrl.username ||
+    relayUrl.password ||
+    relayUrl.hash
+  )
+    throw new Error("MAIL_RELAY_URL must be a valid HTTPS URL.");
+}
 if (new URL(config.APP_ORIGIN).origin !== config.APP_ORIGIN)
   throw new Error("APP_ORIGIN must be an origin without a path.");
 if (production && !config.APP_ORIGIN.startsWith("https://"))

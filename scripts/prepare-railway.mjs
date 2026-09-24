@@ -47,6 +47,9 @@ const shared = {
   MAIL_FROM: process.env.MAIL_FROM || local.MAIL_FROM || "",
   MAILERSEND_API_TOKEN:
     process.env.MAILERSEND_API_TOKEN || local.MAILERSEND_API_TOKEN || "",
+  MAIL_RELAY_URL: process.env.MAIL_RELAY_URL || local.MAIL_RELAY_URL || "",
+  MAIL_RELAY_SECRET:
+    process.env.MAIL_RELAY_SECRET || local.MAIL_RELAY_SECRET || "",
   SMTP_HOST: process.env.SMTP_HOST || local.SMTP_HOST || "",
   SMTP_PORT: process.env.SMTP_PORT || local.SMTP_PORT || "587",
   SMTP_USER: process.env.SMTP_USER || local.SMTP_USER || "",
@@ -101,7 +104,9 @@ const missing = Object.entries(shared)
         "MAIL_FROM",
         ...(shared.MAIL_TRANSPORT === "mailersend"
           ? ["MAILERSEND_API_TOKEN"]
-          : ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]),
+          : shared.MAIL_TRANSPORT === "relay"
+            ? ["MAIL_RELAY_URL", "MAIL_RELAY_SECRET"]
+            : ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]),
       ].includes(key),
   )
   .map(([key]) => key);
@@ -117,3 +122,4 @@ console.log(
     2,
   ),
 );
+
