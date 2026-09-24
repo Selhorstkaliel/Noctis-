@@ -45,7 +45,7 @@ export function MemberList() {
       {["online", "idle", "offline"].map((status) => (
         <section key={status}>
           <h3>
-            {status.toUpperCase()} —{" "}
+            {status.toUpperCase()} â€”{" "}
             {users.filter((u) => u.status === status).length}
           </h3>
           {users
@@ -197,6 +197,11 @@ export function Chat({
     if ((!text.trim() && !attachment) || uploading || sending) return;
     setSending(true);
     try {
+      if (direct && !group && roomError) {
+        await openConversation(room.slice(3));
+        setRoomError("");
+        await loadRoom(room);
+      }
       const music = !direct ? parseMusicCommand(text) : null;
       if (music && server) {
         if (music.command === "play" && !music.argument) {
@@ -358,6 +363,12 @@ export function Chat({
                   key={user.id}
                   href={`#/messages/${user.id}`}
                   className={`dm-person ${room === `dm/${user.id}` ? "active" : ""}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void openConversation(user.id).catch((error) =>
+                      toast((error as Error).message),
+                    );
+                  }}
                 >
                   <Avatar user={user.id} size={36} />
                   <span>
@@ -441,7 +452,7 @@ export function Chat({
             {roomError && (
               <div className="inline-banner" role="alert">
                 {roomError}
-                {direct && room !== "dm/empty" && (
+                {direct && room !== "dm/empty" && !group && (
                   <Button
                     onClick={async () => {
                       await openConversation(room.slice(3));
@@ -488,7 +499,7 @@ export function Chat({
                             count: group.members.length + 1,
                           })
                         : person.activity
-                      : `${server?.name || t("Your community")} · ${t("Every good thing starts with a conversation")}`}
+                      : `${server?.name || t("Your community")} Â· ${t("Every good thing starts with a conversation")}`}
                   </span>
                 </div>
               </div>
@@ -816,7 +827,7 @@ export function Chat({
                           className="add-reaction"
                           title="React with a heart"
                           aria-label="React with a heart"
-                          onClick={() => react(message.id, "🤍")}
+                          onClick={() => react(message.id, "ðŸ¤")}
                         >
                           <Icon name="SmilePlus" size={15} />
                         </button>
@@ -940,16 +951,16 @@ export function Chat({
                 <div className="composer-picker">
                   {picker === "emoji"
                     ? [
-                        "🤍",
-                        "✨",
-                        "🔥",
-                        "🙌",
-                        "👀",
-                        "🎉",
-                        "👋",
-                        "🎧",
-                        "💜",
-                        "🚀",
+                        "ðŸ¤",
+                        "âœ¨",
+                        "ðŸ”¥",
+                        "ðŸ™Œ",
+                        "ðŸ‘€",
+                        "ðŸŽ‰",
+                        "ðŸ‘‹",
+                        "ðŸŽ§",
+                        "ðŸ’œ",
+                        "ðŸš€",
                       ].map((emoji) => (
                         <button
                           key={emoji}
@@ -1045,7 +1056,7 @@ export function Chat({
                   aria-label={t("Message")}
                   placeholder={
                     uploading
-                      ? t("Reading your file…")
+                      ? t("Reading your fileâ€¦")
                       : t("Message {destination}", {
                           destination: direct
                             ? group?.name || `@${person.name}`
@@ -1095,10 +1106,10 @@ export function Chat({
                   <Icon name="Radio" size={12} />
                   {store.connection === "connected"
                     ? t("Connected")
-                    : t("Reconnecting…")}
+                    : t("Reconnectingâ€¦")}
                 </span>
                 <span>
-                  <kbd>Enter</kbd> to send · <kbd>Shift + Enter</kbd> for a new
+                  <kbd>Enter</kbd> to send Â· <kbd>Shift + Enter</kbd> for a new
                   line
                 </span>
               </div>
@@ -1244,3 +1255,4 @@ export function Friends() {
     </div>
   );
 }
+

@@ -192,6 +192,40 @@ test("server administration opens the current server and repairs legacy routes",
     fullPage: true,
   });
 });
+test("choosing a new direct recipient creates the conversation before sending", async ({
+  page,
+}) => {
+  await page.goto("/#/messages");
+  const created = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/conversations") &&
+      response.request().method() === "POST",
+  );
+  const recipient = page.locator(`a[href="#/messages/${memberId}"]`);
+  await expect(recipient).toBeVisible();
+  await recipient.click();
+  expect((await created).status()).toBe(201);
+  await expect(page).toHaveURL(new RegExp(`#/?messages/${memberId}$`));
+
+  const message = `First direct message ${suffix}`;
+  const sent = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/rooms/") &&
+      response.url().endsWith("/messages") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill(message);
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .press("Enter");
+  expect((await sent).status()).toBe(201);
+  await expect(
+    page.locator(".chat-message").filter({ hasText: message }),
+  ).toBeVisible();
+  await expect(page.getByText("This resource is unavailable.")).toHaveCount(0);
+});
 test("messages sync to another user, preserve edits, reactions, replies, pins and attachments", async ({
   page,
   browser,
@@ -226,12 +260,12 @@ test("messages sync to another user, preserve edits, reactions, replies, pins an
   await row.getByRole("button", { name: "Edit message", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Edit message" })
-    .fill(message + " · edited");
+    .fill(message + " Â· edited");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(
     receiver
       .locator(".chat-message")
-      .filter({ hasText: message + " · edited" }),
+      .filter({ hasText: message + " Â· edited" }),
   ).toBeVisible();
   await row.hover();
   await row.getByRole("button", { name: "Pin message", exact: true }).click();
@@ -305,7 +339,7 @@ test("pinned messages stay in an anchored panel without replacing the conversati
     expect(result.status()).toBe(201);
     return (await result.json()).id as string;
   };
-  const important = `Pinned plan ${suffix} — ${"Details for the community. ".repeat(20)}`;
+  const important = `Pinned plan ${suffix} â€” ${"Details for the community. ".repeat(20)}`;
   const pinnedId = await send(important);
   await send(`Unpinned conversation ${suffix}`);
   await page.goto(`/#/server/${serverId}/${slug}`);
@@ -662,7 +696,7 @@ test("settings save on the server and devices show active sessions", async ({
   });
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Saving changes…" }),
+    page.getByRole("button", { name: "Saving changesâ€¦" }),
   ).toBeDisabled();
   await page.getByLabel("Display name", { exact: true }).press("Enter");
   await expect(page.getByRole("alert")).toContainText(
@@ -737,13 +771,13 @@ test("language selection persists and updates core navigation and chat", async (
       .click();
     await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
     await expect(
-      page.getByRole("button", { name: "Salvar alterações", exact: true }),
+      page.getByRole("button", { name: "Salvar alteraÃ§Ãµes", exact: true }),
     ).toBeVisible();
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
     await page.goto("/#/home");
     await expect(
-      page.getByRole("link", { name: "Início", exact: true }),
+      page.getByRole("link", { name: "InÃ­cio", exact: true }),
     ).toBeVisible();
     await page.goto(`/#/server/${serverId}/general`);
     await expect(
@@ -753,10 +787,10 @@ test("language selection persists and updates core navigation and chat", async (
     await page.goto("/#/settings/language");
     await page
       .locator(".language-option")
-      .filter({ hasText: "Inglês" })
+      .filter({ hasText: "InglÃªs" })
       .click();
     await page
-      .getByRole("button", { name: "Salvar alterações", exact: true })
+      .getByRole("button", { name: "Salvar alteraÃ§Ãµes", exact: true })
       .click();
     await expect(page.locator("html")).toHaveAttribute("lang", "en-US");
     await context.close();
