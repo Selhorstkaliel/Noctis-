@@ -40,29 +40,6 @@ export async function createServer(
   input: z.infer<typeof serverInput>,
   serverId = randomUUID(),
 ) {
-  await db.query(
-    `WITH created AS (
-       INSERT INTO servers(id,owner_id,name,description,category,mark,is_public)
-       VALUES($1,$2,$3,$4,$5,$6,$7)
-       RETURNING id
-     )
-     INSERT INTO server_members(server_id,user_id)
-     SELECT id,$2 FROM created`,
-    [
-      serverId,
-      userId,
-      input.name,
-      input.description,
-      input.category,
-      input.name
-        .split(" ")
-        .map((s) => s[0])
-        .slice(0, 2)
-        .join("")
-        .toLowerCase(),
-      input.isPublic,
-    ],
-  );
   const roleDefinitions = [
     { name: "Member", position: 0, permissions: memberPermissions },
     {
@@ -86,40 +63,11 @@ export async function createServer(
     { name: "Admin", position: 50, permissions },
   ];
   const roleIds = roleDefinitions.map(() => randomUUID());
-  await db.query(
-    `INSERT INTO roles(id,server_id,name,position,is_default)
-     SELECT role_id,$1,name,position,name='Member'
-     FROM unnest($2::text[],$3::text[],$4::integer[])
-       AS role(role_id,name,position)`,
-    [
-      serverId,
-      roleIds,
-      roleDefinitions.map((role) => role.name),
-      roleDefinitions.map((role) => role.position),
-    ],
-  );
   const rolePermissionRows = roleDefinitions.flatMap((role, index) =>
     role.permissions.map((permission) => ({
       roleId: roleIds[index],
       permission,
     })),
-  );
-  await db.query(
-    `INSERT INTO role_permissions(role_id,permission)
-     SELECT * FROM unnest($1::text[],$2::text[])`,
-    [
-      rolePermissionRows.map((row) => row.roleId),
-      rolePermissionRows.map((row) => row.permission),
-    ],
-  );
-  await db.query(
-    `WITH settings AS (
-       INSERT INTO music_settings(server_id) VALUES($1)
-       ON CONFLICT DO NOTHING RETURNING server_id
-     )
-     INSERT INTO music_metrics(server_id)
-     SELECT server_id FROM settings ON CONFLICT DO NOTHING`,
-    [serverId],
   );
   const categories = [
     {
@@ -130,18 +78,6 @@ export async function createServer(
     },
     { id: randomUUID(), name: "Voice", position: 1, channels: ["lounge"] },
   ];
-  await db.query(
-    `INSERT INTO channel_categories(id,server_id,name,position)
-     SELECT category_id,$1,name,position
-     FROM unnest($2::text[],$3::text[],$4::integer[])
-       AS category(category_id,name,position)`,
-    [
-      serverId,
-      categories.map((category) => category.id),
-      categories.map((category) => category.name),
-      categories.map((category) => category.position),
-    ],
-  );
   const channels = categories.flatMap((category) =>
     category.channels.map((slug, index) => ({
       id: randomUUID(),
@@ -152,21 +88,98 @@ export async function createServer(
     })),
   );
   await db.query(
-    `INSERT INTO channels(id,server_id,category_id,name,slug,kind,position)
-     SELECT channel_id,$1,category_id,slug,slug,kind,position
-     FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::integer[])
-       AS channel(channel_id,category_id,slug,kind,position)`,
+    `WITH created_server AS (
+       INSERT INTO servers(id,owner_id,name,description,category,mark,is_public)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id
+     ), created_membership AS (
+       INSERT INTO server_members(server_id,user_id)
+       SELECT id,$2 FROM created_server
+       RETURNING server_id
+     )
+     SELECT created_server.id,(SELECT count(*) FROM created_membership) AS memberships
+     FROM created_server`,
     [
       serverId,
-      channels.map((channel) => channel.id),
-      channels.map((channel) => channel.categoryId),
-      channels.map((channel) => channel.slug),
-      channels.map((channel) => channel.kind),
-      channels.map((channel) => channel.position),
+      userId,
+      input.name,
+      input.description,
+      input.category,
+      input.name
+        .split(" ")
+        .map((s) => s[0])
+        .slice(0, 2)
+        .join("")
+        .toLowerCase(),
+      input.isPublic,
     ],
   );
-  await audit(db, userId, "server.created", serverId, serverId);
-  await changed(db, `user:${userId}`);
+  await db.query(
+    `WITH created_roles AS (
+       INSERT INTO roles(id,server_id,name,position,is_default)
+       SELECT role_id,$1,name,position,name='Member'
+       FROM unnest($2::text[],$3::text[],$4::integer[])
+         AS role(role_id,name,position)
+       RETURNING id
+     ), created_settings AS (
+       INSERT INTO music_settings(server_id) VALUES($1)
+       ON CONFLICT DO NOTHING
+       RETURNING server_id
+     ), created_metrics AS (
+       INSERT INTO music_metrics(server_id)
+       SELECT server_id FROM created_settings
+       ON CONFLICT DO NOTHING
+       RETURNING server_id
+     ), created_categories AS (
+       INSERT INTO channel_categories(id,server_id,name,position)
+       SELECT category_id,$1,name,position
+       FROM unnest($5::text[],$6::text[],$7::integer[])
+         AS category(category_id,name,position)
+       RETURNING id
+     )
+     SELECT (SELECT count(*) FROM created_roles) AS roles,
+            (SELECT count(*) FROM created_metrics) AS metrics,
+            (SELECT count(*) FROM created_categories) AS categories`,
+    [
+      serverId,
+      roleIds,
+      roleDefinitions.map((role) => role.name),
+      roleDefinitions.map((role) => role.position),
+      categories.map((category) => category.id),
+      categories.map((category) => category.name),
+      categories.map((category) => category.position),
+    ],
+  );
+  await db.query(
+    `INSERT INTO role_permissions(role_id,permission)
+     SELECT role_id,permission
+     FROM unnest($1::text[],$2::text[]) AS item(role_id,permission)`,
+    [
+      rolePermissionRows.map((row) => row.roleId),
+      rolePermissionRows.map((row) => row.permission),
+    ],
+  );
+  const channelValues = channels.flatMap((channel) => [
+    channel.id,
+    serverId,
+    channel.categoryId,
+    channel.slug,
+    channel.kind,
+    channel.position,
+  ]);
+  await db.query(
+    `INSERT INTO channels(id,server_id,category_id,name,slug,kind,position) VALUES ${channels
+      .map((_, index) => {
+        const offset = index * 6;
+        return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 4},$${offset + 5},$${offset + 6})`;
+      })
+      .join(",")}`,
+    channelValues,
+  );
+  await db.query(
+    "SELECT noctis.append_audit($1,'server.created',$2,$2,'{}'::jsonb),pg_notify('noctis_changes',$3)",
+    [userId, serverId, `user:${userId}`],
+  );
   return serverId;
 }
 export async function communityRoutes(app: FastifyInstance) {
