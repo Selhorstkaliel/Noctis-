@@ -19,6 +19,7 @@ import {
   useStore,
   loadRoom,
   command,
+  refresh,
   openConversation,
   activeServer,
 } from "./store";
@@ -45,7 +46,7 @@ export function MemberList() {
       {["online", "idle", "offline"].map((status) => (
         <section key={status}>
           <h3>
-            {status.toUpperCase()} â€”{" "}
+            {status.toUpperCase()} —{" "}
             {users.filter((u) => u.status === status).length}
           </h3>
           {users
@@ -499,7 +500,7 @@ export function Chat({
                             count: group.members.length + 1,
                           })
                         : person.activity
-                      : `${server?.name || t("Your community")} Â· ${t("Every good thing starts with a conversation")}`}
+                      : `${server?.name || t("Your community")} · ${t("Every good thing starts with a conversation")}`}
                   </span>
                 </div>
               </div>
@@ -827,7 +828,7 @@ export function Chat({
                           className="add-reaction"
                           title="React with a heart"
                           aria-label="React with a heart"
-                          onClick={() => react(message.id, "ðŸ¤")}
+                          onClick={() => react(message.id, "🤍")}
                         >
                           <Icon name="SmilePlus" size={15} />
                         </button>
@@ -951,16 +952,16 @@ export function Chat({
                 <div className="composer-picker">
                   {picker === "emoji"
                     ? [
-                        "ðŸ¤",
-                        "âœ¨",
-                        "ðŸ”¥",
-                        "ðŸ™Œ",
-                        "ðŸ‘€",
-                        "ðŸŽ‰",
-                        "ðŸ‘‹",
-                        "ðŸŽ§",
-                        "ðŸ’œ",
-                        "ðŸš€",
+                        "🤍",
+                        "✨",
+                        "🔥",
+                        "🙌",
+                        "👀",
+                        "🎉",
+                        "👋",
+                        "🎧",
+                        "💜",
+                        "🚀",
                       ].map((emoji) => (
                         <button
                           key={emoji}
@@ -1056,7 +1057,7 @@ export function Chat({
                   aria-label={t("Message")}
                   placeholder={
                     uploading
-                      ? t("Reading your fileâ€¦")
+                      ? t("Reading your file…")
                       : t("Message {destination}", {
                           destination: direct
                             ? group?.name || `@${person.name}`
@@ -1106,10 +1107,10 @@ export function Chat({
                   <Icon name="Radio" size={12} />
                   {store.connection === "connected"
                     ? t("Connected")
-                    : t("Reconnectingâ€¦")}
+                    : t("Reconnecting…")}
                 </span>
                 <span>
-                  <kbd>Enter</kbd> to send Â· <kbd>Shift + Enter</kbd> for a new
+                  <kbd>Enter</kbd> to send · <kbd>Shift + Enter</kbd> for a new
                   line
                 </span>
               </div>
@@ -1154,7 +1155,9 @@ export function Friends() {
   const store = useStore();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All friends");
-  const { open } = useUI();
+  const { open, toast } = useUI();
+  const { t } = useI18n();
+  const normalizedQuery = query.trim().toLowerCase();
   const filtered = users.filter(
     (u) =>
       store.friendships.some(
@@ -1163,96 +1166,168 @@ export function Friends() {
           (f.requesterId === u.id || f.recipientId === u.id),
       ) &&
       u.id !== store.profile.id &&
-      u.name.toLowerCase().includes(query.toLowerCase()) &&
+      `${u.name} ${u.handle}`.toLowerCase().includes(normalizedQuery) &&
       (filter !== "Online" || u.status === "online"),
+  );
+  const pending = store.friendships.filter(
+    (friendship) => friendship.status === "pending",
   );
   return (
     <div className="page-content standard-page">
       <PageHeading
-        eyebrow="YOUR PEOPLE"
-        title="A familiar face goes a long way."
-        description="Keep good company. Pick up where you left off."
+        eyebrow={t("YOUR PEOPLE")}
+        title={t("A familiar face goes a long way.")}
+        description={t("Keep good company. Pick up where you left off.")}
         action={
           <Button
             variant="primary"
             icon="UserPlus"
             onClick={() => open({ type: "add-friend" })}
           >
-            Add a friend
+            {t("Add a friend")}
           </Button>
         }
       />
-      {store.friendships
-        .filter(
-          (f) => f.status === "pending" && f.recipientId === store.profile.id,
-        )
-        .map((f) => (
-          <div className="setting-row" key={f.requesterId}>
-            <strong>{getUser(f.requesterId).name} sent a friend request</strong>
-            <Button
-              onClick={() =>
-                command(`/friends/${f.requesterId}`, "PUT", { accept: true })
-              }
-            >
-              Accept
-            </Button>
-            <Button
-              onClick={() =>
-                command(`/friends/${f.requesterId}`, "PUT", { accept: false })
-              }
-            >
-              Decline
-            </Button>
-          </div>
-        ))}
       <div className="filter-toolbar">
         <div className="tabs">
-          {["All friends", "Online"].map((tab) => (
+          {["All friends", "Online", "Pending"].map((tab) => (
             <button
               key={tab}
               className={tab === filter ? "active" : ""}
               onClick={() => setFilter(tab)}
             >
-              {tab}
+              {t(tab)}
+              {tab === "Pending" && pending.length > 0 && (
+                <span className="tab-count">{pending.length}</span>
+              )}
             </button>
           ))}
         </div>
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="Find a friend"
-          label="Find a friend"
+          placeholder={t("Find a friend")}
+          label={t("Find a friend")}
         />
       </div>
-      <div className="friends-grid">
-        {filtered.map((user) => (
-          <article className="friend-card" key={user.id}>
-            <Avatar
-              user={user.id}
-              size={54}
-              onClick={() => open({ type: "profile", id: user.id })}
-            />
-            <div>
-              <h3>{user.name}</h3>
-              <span>@{user.handle}</span>
-            </div>
-            <p>{user.activity}</p>
-            <Button
-              icon="MessageCircle"
-              onClick={() => void openConversation(user.id)}
-            >
-              Send message
-            </Button>
-          </article>
-        ))}
-      </div>
-      {!filtered.length && (
+      {filter === "Pending" ? (
+        <div className="friend-request-list">
+          {pending
+            .filter((friendship) => {
+              const person = getUser(
+                friendship.requesterId === store.profile.id
+                  ? friendship.recipientId
+                  : friendship.requesterId,
+              );
+              return `${person.name} ${person.handle}`
+                .toLowerCase()
+                .includes(normalizedQuery);
+            })
+            .map((friendship) => {
+              const incoming = friendship.recipientId === store.profile.id;
+              const person = getUser(
+                incoming ? friendship.requesterId : friendship.recipientId,
+              );
+              return (
+                <article className="friend-request-card" key={person.id}>
+                  <Avatar
+                    user={person.id}
+                    size={46}
+                    onClick={() => open({ type: "profile", id: person.id })}
+                  />
+                  <div>
+                    <strong>{person.name}</strong>
+                    <span>@{person.handle}</span>
+                    <p>
+                      {t(
+                        incoming
+                          ? "Sent you a friend request"
+                          : "Friend request sent",
+                      )}
+                    </p>
+                  </div>
+                  {incoming ? (
+                    <div className="friend-request-actions">
+                      <Button
+                        variant="primary"
+                        onClick={async () => {
+                          await command(`/friends/${person.id}`, "PUT", {
+                            accept: true,
+                          });
+                          await refresh();
+                          toast(t("Friend request accepted"));
+                        }}
+                      >
+                        {t("Accept")}
+                      </Button>
+                      <Button
+                        onClick={async () => {
+                          await command(`/friends/${person.id}`, "PUT", {
+                            accept: false,
+                          });
+                          await refresh();
+                          toast(t("Friend request declined"));
+                        }}
+                      >
+                        {t("Decline")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Badge tone="violet" icon="Clock3">
+                      {t("Waiting for response")}
+                    </Badge>
+                  )}
+                </article>
+              );
+            })}
+        </div>
+      ) : (
+        <div className="friends-grid">
+          {filtered.map((user) => (
+            <article className="friend-card" key={user.id}>
+              <Avatar
+                user={user.id}
+                size={54}
+                onClick={() => open({ type: "profile", id: user.id })}
+              />
+              <div>
+                <h3>{user.name}</h3>
+                <span>@{user.handle}</span>
+              </div>
+              <p>{user.activity}</p>
+              <Button
+                icon="MessageCircle"
+                onClick={() => void openConversation(user.id)}
+              >
+                {t("Send message")}
+              </Button>
+            </article>
+          ))}
+        </div>
+      )}
+      {((filter === "Pending" &&
+        !pending.some((friendship) => {
+          const person = getUser(
+            friendship.requesterId === store.profile.id
+              ? friendship.recipientId
+              : friendship.requesterId,
+          );
+          return `${person.name} ${person.handle}`
+            .toLowerCase()
+            .includes(normalizedQuery);
+        })) ||
+        (filter !== "Pending" && !filtered.length)) && (
         <EmptyState
-          title="No friends found"
-          description="Try a different name or clear your search."
+          title={t(
+            filter === "Pending" ? "No pending requests" : "No friends found",
+          )}
+          description={t(
+            filter === "Pending"
+              ? "Search for someone by name to send a friend request."
+              : "Try a different name or clear your search.",
+          )}
         />
       )}
     </div>
   );
 }
-

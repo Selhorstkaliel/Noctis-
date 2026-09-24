@@ -188,6 +188,80 @@ test("BOLA: authentication does not grant server, channel, private-room, or sear
   assert.equal(search.status, 200);
   assert.equal(search.data.messages.length, 0);
 });
+test("friends can be found by name and requested once from search or a server profile", async () => {
+  const candidate = await createActor("candidate");
+  assert.equal(
+    (await request(candidate, "POST", `/servers/${serverId}/join`, {})).status,
+    200,
+  );
+
+  const visible = await request(owner, "GET", "/friends/search?q=candidate");
+  assert.equal(visible.status, 200, JSON.stringify(visible.data));
+  const person = visible.data.find((item: any) => item.id === candidate.id);
+  assert.equal(person.name, "Security candidate");
+  assert.equal(person.relationship, "none");
+  const byHandle = await request(
+    owner,
+    "GET",
+    `/friends/search?q=${encodeURIComponent(`@${person.handle}`)}`,
+  );
+  assert.equal(byHandle.status, 200, JSON.stringify(byHandle.data));
+  assert.equal(
+    byHandle.data.some((item: any) => item.id === candidate.id),
+    true,
+  );
+
+  const hidden = await request(outsider, "GET", "/friends/search?q=candidate");
+  assert.equal(hidden.status, 200, JSON.stringify(hidden.data));
+  assert.equal(
+    hidden.data.some((item: any) => item.id === candidate.id),
+    false,
+  );
+
+  const first = await request(owner, "POST", "/friends", {
+    targetId: candidate.id,
+  });
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.equal(first.data.relationship, "outgoing");
+  const duplicate = await request(owner, "POST", "/friends", {
+    targetId: candidate.id,
+  });
+  assert.equal(duplicate.status, 200, JSON.stringify(duplicate.data));
+  assert.equal(duplicate.data.relationship, "outgoing");
+
+  const candidateState = await request(candidate, "GET", "/bootstrap");
+  assert.equal(candidateState.status, 200, JSON.stringify(candidateState.data));
+  assert.equal(
+    candidateState.data.notifications.filter(
+      (notification: any) =>
+        notification.kind === "friend-request" &&
+        notification.actorId === owner.id,
+    ).length,
+    1,
+  );
+  const incoming = await request(
+    candidate,
+    "GET",
+    "/friends/search?q=Security",
+  );
+  assert.equal(
+    incoming.data.find((item: any) => item.id === owner.id).relationship,
+    "incoming",
+  );
+  assert.equal(
+    (
+      await request(candidate, "PUT", `/friends/${owner.id}`, {
+        accept: true,
+      })
+    ).status,
+    200,
+  );
+  const accepted = await request(owner, "GET", "/friends/search?q=candidate");
+  assert.equal(
+    accepted.data.find((item: any) => item.id === candidate.id).relationship,
+    "accepted",
+  );
+});
 test("message editing, reactions, replies, pins, and soft deletion obey ownership and room scope", async () => {
   const room = `${serverId}%2Fgeneral`;
   const a = await request(owner, "POST", `/rooms/${room}/messages`, {
@@ -222,7 +296,7 @@ test("message editing, reactions, replies, pins, and soft deletion obey ownershi
   assert.equal(
     (
       await request(member, "PUT", `/messages/${a.data.id}/reactions`, {
-        emoji: "ðŸ”¥",
+        emoji: "🔥",
         active: true,
       })
     ).status,
@@ -1093,4 +1167,3 @@ test("WebSocket origin, private subscriptions, voice room membership, and revoke
   assert.equal(await closed, 4401);
   assert.equal((await request(owner, "GET", "/bootstrap")).status, 401);
 });
-

@@ -834,26 +834,113 @@ export async function communityRoutes(app: FastifyInstance) {
       return { ok: true };
     }),
   );
+  app.get("/api/friends/search", async (req) => {
+    const input = z
+      .object({
+        q: z.string().trim().min(2).max(60),
+        limit: z.coerce.number().int().min(1).max(20).default(12),
+      })
+      .strict()
+      .parse(req.query);
+    await throttle("friend-search", req.identity.userId, 60, 60);
+    return transaction(req.identity, async (db) => {
+      const term = input.q.replace(/^@/, "");
+      const pattern = `%${term.replace(/[%_\\]/g, "\\$&")}%`;
+      const result = await db.query(
+        `SELECT p.user_id AS id,p.name,p.handle,p.avatar,p.avatar_upload_id,p.color,
+                CASE WHEN pr.user_id IS NULL THEN 'offline' ELSE p.status END AS status,
+                p.allow_friend_requests AS "canRequest",
+                CASE
+                  WHEN f.status='accepted' THEN 'accepted'
+                  WHEN f.requester_id=$1 THEN 'outgoing'
+                  WHEN f.recipient_id=$1 THEN 'incoming'
+                  ELSE 'none'
+                END AS relationship
+           FROM profiles p
+           LEFT JOIN presence pr ON pr.user_id=p.user_id
+             AND pr.updated_at>now()-interval '45 seconds'
+           LEFT JOIN friendships f ON
+             (f.requester_id=$1 AND f.recipient_id=p.user_id) OR
+             (f.recipient_id=$1 AND f.requester_id=p.user_id)
+          WHERE p.user_id<>$1
+            AND NOT noctis.blocked($1,p.user_id)
+            AND (p.name ILIKE $2 OR p.handle ILIKE $2)
+          ORDER BY
+            (lower(p.handle)=lower($3)) DESC,
+            (lower(p.name) LIKE lower($3)||'%') DESC,
+            p.name,p.user_id
+          LIMIT $4`,
+        [req.identity.userId, pattern, term, input.limit],
+      );
+      return result.rows.map(({ avatar_upload_id, ...profile }) => ({
+        ...profile,
+        avatarUrl: avatar_upload_id
+          ? `/api/uploads/${avatar_upload_id}`
+          : undefined,
+      }));
+    });
+  });
   app.post("/api/friends", async (req) => {
     const input = z
-      .object({ handle: text.max(32) })
+      .object({
+        targetId: id.optional(),
+        handle: text.max(32).optional(),
+      })
       .strict()
+      .refine(
+        (value) => Number(!!value.targetId) + Number(!!value.handle) === 1,
+        {
+          message: "Choose one person.",
+        },
+      )
       .parse(req.body);
     await throttle("friend-request", req.identity.userId, 15, 3600);
     return transaction(req.identity, async (db) => {
-      const r = await db.query("SELECT user_id FROM profiles WHERE handle=$1", [
-        input.handle.replace(/^@/, ""),
-      ]);
+      const r = await db.query(
+        "SELECT user_id FROM profiles WHERE ($1::text IS NOT NULL AND user_id=$1) OR ($2::text IS NOT NULL AND lower(handle)=lower($2))",
+        [input.targetId || null, input.handle?.replace(/^@/, "") || null],
+      );
       requireThat(r.rowCount, 404, "This person is unavailable.");
       const target = r.rows[0].user_id;
+      requireThat(
+        target !== req.identity.userId,
+        400,
+        "You cannot send a friend request to yourself.",
+      );
       const p = await canContact(db, target, req.identity.userId);
+      await db.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('friendship:'||least($1,$2)||':'||greatest($1,$2),0))",
+        [req.identity.userId, target],
+      );
+      const existing = await db.query(
+        "SELECT requester_id,recipient_id,status FROM friendships WHERE (requester_id=$1 AND recipient_id=$2) OR (requester_id=$2 AND recipient_id=$1)",
+        [req.identity.userId, target],
+      );
+      if (existing.rowCount) {
+        const friendship = existing.rows[0];
+        if (friendship.status === "accepted")
+          return { ok: true, relationship: "accepted" };
+        if (friendship.requester_id === req.identity.userId)
+          return { ok: true, relationship: "outgoing" };
+        await db.query(
+          "UPDATE friendships SET status='accepted' WHERE requester_id=$1 AND recipient_id=$2",
+          [target, req.identity.userId],
+        );
+        await db.query(
+          "INSERT INTO notifications(user_id,actor_id,kind,title,route) VALUES($1,$2,'friend-accepted','Your friend request was accepted','friends')",
+          [target, req.identity.userId],
+        );
+        await changed(db, `user:${target}`);
+        await changed(db, `user:${req.identity.userId}`);
+        return { ok: true, relationship: "accepted" };
+      }
       requireThat(
         p.allow_friend_requests,
         403,
         "This person is not accepting friend requests.",
       );
       await db.query(
-        "INSERT INTO friendships(requester_id,recipient_id,status) VALUES($1,$2,'pending') ON CONFLICT DO NOTHING",
+        "INSERT INTO friendships(requester_id,recipient_id,status) VALUES($1,$2,'pending')",
         [req.identity.userId, target],
       );
       await db.query(
@@ -862,7 +949,7 @@ export async function communityRoutes(app: FastifyInstance) {
       );
       await changed(db, `user:${target}`);
       await changed(db, `user:${req.identity.userId}`);
-      return { ok: true };
+      return { ok: true, relationship: "outgoing" };
     });
   });
   app.put("/api/friends/:id", (req) =>
@@ -871,10 +958,14 @@ export async function communityRoutes(app: FastifyInstance) {
       const input = z.object({ accept: z.boolean() }).strict().parse(req.body);
       if (input.accept) {
         const r = await db.query(
-          "UPDATE friendships SET status='accepted' WHERE requester_id=$1 AND recipient_id=$2 AND NOT noctis.blocked($1,$2) RETURNING requester_id",
+          "UPDATE friendships SET status='accepted' WHERE requester_id=$1 AND recipient_id=$2 AND status='pending' AND NOT noctis.blocked($1,$2) RETURNING requester_id",
           [p.id, req.identity.userId],
         );
         requireThat(r.rowCount);
+        await db.query(
+          "INSERT INTO notifications(user_id,actor_id,kind,title,route) VALUES($1,$2,'friend-accepted','Your friend request was accepted','friends')",
+          [p.id, req.identity.userId],
+        );
       } else
         await db.query(
           "DELETE FROM friendships WHERE (requester_id=$1 AND recipient_id=$2) OR (requester_id=$2 AND recipient_id=$1)",
@@ -934,4 +1025,3 @@ export async function communityRoutes(app: FastifyInstance) {
     }),
   );
 }
-

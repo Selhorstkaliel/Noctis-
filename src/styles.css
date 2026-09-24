@@ -2823,6 +2823,56 @@ kbd {
 .people-picker + .field {
   margin-top: 22px;
 }
+.friend-search-results {
+  min-height: 112px;
+}
+.friend-search-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.friend-search-row:last-child {
+  border-bottom: 0;
+}
+.friend-search-identity {
+  min-width: 0;
+  flex: 1;
+  padding: 5px 2px;
+  text-align: left;
+  border-radius: 6px;
+}
+.friend-search-identity:hover,
+.friend-search-identity:focus-visible {
+  color: var(--primary);
+}
+.friend-search-identity strong,
+.friend-search-identity small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.friend-search-identity strong {
+  font-size: 12px;
+}
+.friend-search-identity small {
+  margin-top: 2px;
+  color: var(--subtle);
+  font-size: 10px;
+}
+.friend-search-row > .button {
+  flex: 0 0 auto;
+}
+.friend-search-note {
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
 .invite-page {
   min-height: 100%;
   background: radial-gradient(ellipse at 50% 40%, #aaa2ff12, transparent 60%);
@@ -3627,6 +3677,54 @@ kbd {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
+}
+.tab-count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #aaa2ff16;
+  color: #d8d1ec;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.friend-request-list {
+  display: grid;
+  gap: 10px;
+}
+.friend-request-card {
+  min-height: 78px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.friend-request-card > div:not(.friend-request-actions) {
+  min-width: 0;
+  flex: 1;
+}
+.friend-request-card strong,
+.friend-request-card span,
+.friend-request-card p {
+  display: block;
+}
+.friend-request-card strong {
+  font-size: 12px;
+}
+.friend-request-card span,
+.friend-request-card p {
+  margin-top: 2px;
+  color: var(--subtle);
+  font-size: 10px;
+}
+.friend-request-actions {
+  display: flex;
+  gap: 7px;
 }
 .friend-card {
   position: relative;
@@ -5542,6 +5640,30 @@ kbd {
 @media (max-width: 640px) {
   .login-header-actions > .subtle-link {
     display: none;
+  }
+}
+@media (max-width: 640px) {
+  .friend-search-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .friend-search-row > .avatar {
+    margin-top: 2px;
+  }
+  .friend-search-row > .button {
+    width: 100%;
+    margin-left: 51px;
+  }
+  .friend-request-card {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .friend-request-actions {
+    width: 100%;
+    padding-left: 59px;
+  }
+  .friend-request-actions > .button {
+    flex: 1;
   }
 }
 .login-story {
@@ -8835,4 +8957,3 @@ kbd {
     gap: 12px;
   }
 }
-
