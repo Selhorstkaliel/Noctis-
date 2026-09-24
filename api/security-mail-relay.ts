@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import nodemailer from "nodemailer";
 
 type RelayMail = {
@@ -46,9 +46,16 @@ export default {
     if (request.method !== "POST")
       return reply(405, { error: "method_not_allowed" });
 
-    const relaySecret = process.env.MAIL_RELAY_SECRET || "";
-    const gmailUser = process.env.GMAIL_USER || "";
-    const gmailPassword = process.env.GMAIL_APP_PASSWORD || "";
+    const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER || "";
+    const gmailPassword =
+      process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || "";
+    const relaySecret =
+      process.env.MAIL_RELAY_SECRET ||
+      (gmailPassword
+        ? createHmac("sha256", gmailPassword)
+            .update("noctis-mail-relay-v1")
+            .digest("hex")
+        : "");
     if (
       relaySecret.length < 32 ||
       !gmailUser ||
