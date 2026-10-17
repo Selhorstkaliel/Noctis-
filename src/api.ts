@@ -112,6 +112,7 @@ let ready = false;
 let topics: string[] = [];
 let csrfToken = "";
 let retryCount = 0;
+let liveGeneration = 0;
 export function onLive(listener: (frame: LiveFrame) => void) {
   listeners.add(listener);
   return () => {
@@ -131,46 +132,66 @@ export function connectLive(token: string) {
   csrfToken = token;
   wanted = true;
   if (socket && socket.readyState < 2) return;
+  const generation = ++liveGeneration;
   ready = false;
-  socket = new WebSocket(
-    `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/realtime`,
-  );
-  socket.onopen = () =>
-    socket?.send(JSON.stringify({ type: "auth", csrf: csrfToken }));
-  socket.onmessage = (e) => {
-    const frame = JSON.parse(e.data) as LiveFrame;
-    if (frame.type === "ready") {
-      ready = true;
-      retryCount = 0;
-      sendLive({ type: "subscribe", topics });
-      sendLive({ type: "ping" });
-      interval = setInterval(() => {
-        if (ready) sendLive({ type: "ping" });
-      }, 15000);
-    }
-    listeners.forEach((fn) => fn(frame));
-  };
-  socket.onclose = (e) => {
-    ready = false;
-    clearInterval(interval);
-    listeners.forEach((fn) => fn({ type: "disconnected" }));
-    if (e.code === 4401) {
-      wanted = false;
-      window.dispatchEvent(new Event("noctis-session-expired"));
-    }
-    if (wanted)
-      retry = setTimeout(
-        () => connectLive(csrfToken),
-        Math.min(15000, 1000 * 2 ** retryCount++),
-      );
-  };
-  socket.onerror = () => socket?.close();
+  void api<{ url: string; ticket: string }>("/realtime/ticket")
+    .then(({ url, ticket }) => {
+      if (!wanted || generation !== liveGeneration) return;
+      const target = new URL(url);
+      target.searchParams.set("access_token", ticket);
+      const active = new WebSocket(target);
+      socket = active;
+      active.onopen = () =>
+        active.send(JSON.stringify({ type: "auth", csrf: csrfToken }));
+      active.onmessage = (e) => handleLiveMessage(e);
+      active.onclose = (e) => handleLiveClose(e, active, generation);
+      active.onerror = () => active.close();
+    })
+    .catch(() => {
+      if (!wanted || generation !== liveGeneration) return;
+      scheduleLiveReconnect();
+    });
+}
+function handleLiveMessage(e: MessageEvent) {
+  const frame = JSON.parse(e.data) as LiveFrame;
+  if (frame.type === "ready") {
+    ready = true;
+    retryCount = 0;
+    sendLive({ type: "subscribe", topics });
+    sendLive({ type: "ping" });
+    interval = setInterval(() => {
+      if (ready) sendLive({ type: "ping" });
+    }, 15000);
+  }
+  listeners.forEach((fn) => fn(frame));
+}
+function scheduleLiveReconnect() {
+  clearTimeout(retry);
+  listeners.forEach((fn) => fn({ type: "disconnected" }));
+  if (wanted)
+    retry = setTimeout(
+      () => connectLive(csrfToken),
+      Math.min(15000, 1000 * 2 ** retryCount++),
+    );
+}
+function handleLiveClose(e: CloseEvent, closed: WebSocket, generation: number) {
+  if (socket === closed) socket = undefined;
+  if (generation !== liveGeneration) return;
+  ready = false;
+  clearInterval(interval);
+  if (e.code === 4401) {
+    wanted = false;
+    window.dispatchEvent(new Event("noctis-session-expired"));
+  }
+  scheduleLiveReconnect();
 }
 export function disconnectLive() {
   wanted = false;
+  liveGeneration++;
   ready = false;
   clearInterval(interval);
   clearTimeout(retry);
   socket?.close();
   socket = undefined;
 }
+

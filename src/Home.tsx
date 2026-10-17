@@ -335,7 +335,7 @@ export function Home() {
           <span>
             {store.connection === "connected"
               ? t("Connected to Noctis")
-              : t("Reconnecting…")}
+              : t("Reconnectingâ€¦")}
             <i className="online-dot" />
           </span>
         </footer>
@@ -378,7 +378,7 @@ export function Home() {
                   <IconButton
                     name="MessageCircle"
                     label={`Message ${user.name}`}
-                    onClick={() => navigate(`messages/${id}`)}
+                    onClick={() => void openConversation(id)}
                   />
                 </div>
               );
@@ -490,7 +490,7 @@ export function Home() {
           <div>
             <strong>{t("Making your mark")}</strong>
             <span>
-              {t("Level")} {Math.floor(store.profile.xp / 250) + 1} ·{" "}
+              {t("Level")} {Math.floor(store.profile.xp / 250) + 1} Â·{" "}
               {t("Explorer")}
             </span>
           </div>
@@ -524,3 +524,4 @@ export function Home() {
 function LogoMini() {
   return <img src="/noctis.svg" alt="Noctis" width="20" height="20" />;
 }
+

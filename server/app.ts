@@ -35,7 +35,7 @@ export async function buildApp(
   const app = Fastify({
     bodyLimit: 128 * 1024,
     requestTimeout: 15000,
-    connectionTimeout: 10000,
+    connectionTimeout: 30000,
     keepAliveTimeout: 5000,
     trustProxy: process.env.TRUST_PROXY_CIDR
       ? process.env.TRUST_PROXY_CIDR.split(",")
@@ -244,3 +244,4 @@ export async function buildApp(
   }
   return app;
 }
+

@@ -74,6 +74,10 @@ Hairline borders and tonal changes establish hierarchy. Shadows belong to overla
 
 Active calls remain present while people move through the product. A compact graphite dock sits at the bottom of the workspace with the room identity, connection time and the same familiar media controls. It uses one soft top shadow and a restrained mint signal so the call is visible without competing with the conversation.
 
+Screen sharing asks whether to include source audio before opening the browser picker. The two choices use the standard dialog and clearly state that audio availability still depends on the tab, window, or screen selected in the browser. Shared-screen audio remains separate from the microphone so muting a member does not silence media they intentionally share.
+
+Friend discovery searches server-visible people by display name or username. Every result and server profile shows one clear relationship state: add, request sent, accept, or friends. Incoming and outgoing requests live together under Pending, with counts and immediate feedback, while privacy settings and blocks remain authoritative on the server.
+
 The music bot and shared screens use the same card geometry as people. Provider video lives inside the bot card with a dark lower scrim for identity, while every screen share gets a quiet glass toolbar for live state and expansion. The `#general` music strip stays horizontal and compact so transport controls remain close without displacing the transcript.
 
 ## Shapes

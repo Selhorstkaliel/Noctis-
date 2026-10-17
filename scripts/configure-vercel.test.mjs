@@ -37,5 +37,13 @@ test("API routes preserve same origin and cannot fall through to SPA HTML or CDN
         h.value.includes("frame-ancestors 'none'"),
     ),
   );
+  assert.ok(
+    page.headers.some(
+      (h) =>
+        h.key === "Content-Security-Policy" &&
+        h.value.includes("connect-src 'self' wss://backend.test"),
+    ),
+  );
   assert.ok(!JSON.stringify(config).includes("LIVEKIT_API_SECRET"));
 });
+

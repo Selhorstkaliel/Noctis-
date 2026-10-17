@@ -11,10 +11,11 @@ try {
   check("verified database TLS configured", config.DATABASE_SSL === "true");
   check(
     "SMTP delivery configured",
-    config.MAIL_TRANSPORT === "smtp" &&
+    (config.MAIL_TRANSPORT === "smtp" &&
       !!config.SMTP_HOST &&
       !!config.SMTP_USER &&
-      !!config.SMTP_PASSWORD,
+      !!config.SMTP_PASSWORD) ||
+      (config.MAIL_TRANSPORT === "mailersend" && !!config.MAILERSEND_API_TOKEN),
   );
   check(
     "distinct encryption and session keys",
@@ -26,21 +27,29 @@ try {
     ["auth", authPool],
     ["worker", workerPool],
   ]) {
-    const role = await pool.query(
-      "SELECT rolname,rolsuper,rolbypassrls,rolcreaterole,rolcreatedb FROM pg_roles WHERE rolname=current_user",
-    );
-    roleNames.push(role.rows[0].rolname);
-    check(
-      `${label} restricted database role`,
-      !role.rows[0].rolsuper &&
-        !role.rows[0].rolbypassrls &&
-        !role.rows[0].rolcreaterole &&
-        !role.rows[0].rolcreatedb,
-    );
-    const tls = await pool.query(
-      "SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()",
-    );
-    check(`${label} active TLS connection`, tls.rows[0]?.ssl);
+    const db = await pool.connect();
+    try {
+      const role = await db.query(
+        "SELECT rolname,rolsuper,rolbypassrls,rolcreaterole,rolcreatedb FROM pg_roles WHERE rolname=current_user",
+      );
+      roleNames.push(role.rows[0].rolname);
+      check(
+        `${label} restricted database role`,
+        !role.rows[0].rolsuper &&
+          !role.rows[0].rolbypassrls &&
+          !role.rows[0].rolcreaterole &&
+          !role.rows[0].rolcreatedb,
+      );
+      // A transaction pooler terminates client TLS before opening its own
+      // backend connection, so pg_stat_ssl describes the wrong network hop.
+      const stream = db.connection.stream;
+      check(
+        `${label} active TLS connection`,
+        stream.encrypted === true && stream.authorized === true,
+      );
+    } finally {
+      db.release();
+    }
   }
   check("separate runtime roles", new Set(roleNames).size === 3);
   const owner = await apiPool.query(

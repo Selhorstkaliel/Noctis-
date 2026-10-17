@@ -474,8 +474,8 @@ export async function command<T = any>(
     const result = await api<T>(path, method, body);
     if (/^\/rooms\/[^/]+\/read$/.test(path)) {
       const room = decodeURIComponent(path.split("/")[2]);
-      await syncRoom(room, []);
-    } else await refresh();
+      void syncRoom(room, []).catch(reportError);
+    } else if (path !== "/conversations") void refresh().catch(reportError);
     return result;
   } catch (error) {
     reportError(error);
@@ -779,8 +779,38 @@ export async function updateStore(mutator: (current: Store) => Store) {
         location.assign(result.url);
       }
     if (onlyMessages) {
-      for (const [room, ids] of touched) await syncRoom(room, [...ids]);
-    } else await refresh();
+      const beforeById = new Map(
+        before.messages.map((message) => [message.id, message]),
+      );
+      const changedIds = new Set<string>();
+      const committed = new Map<string, Message>();
+      for (const message of next.messages) {
+        const previous = beforeById.get(message.id);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(message)) {
+          const id = aliases.get(message.id) || message.id;
+          changedIds.add(message.id);
+          changedIds.add(id);
+          committed.set(id, { ...message, id });
+        }
+      }
+      for (const message of before.messages)
+        if (!next.messages.some((candidate) => candidate.id === message.id))
+          changedIds.add(message.id);
+      publish({
+        ...state,
+        messages: [
+          ...state.messages.filter((message) => !changedIds.has(message.id)),
+          ...committed.values(),
+        ],
+        pending: false,
+        error: "",
+      });
+      for (const [room, ids] of touched)
+        void syncRoom(room, [...ids]).catch(reportError);
+    } else {
+      publish({ ...next, pending: false, error: "" });
+      void refresh().catch(reportError);
+    }
   } catch (error) {
     reportError(error);
     throw error;
@@ -795,3 +825,4 @@ window.addEventListener("unhandledrejection", (e) => {
     reportError(e.reason);
   }
 });
+

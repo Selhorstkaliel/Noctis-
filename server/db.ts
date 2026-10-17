@@ -59,11 +59,14 @@ export async function transaction<T>(
   const db = await apiPool.connect();
   try {
     await db.query("BEGIN");
-    await db.query(
-      "SELECT set_config('noctis.user_id',$1,true),set_config('noctis.session_id',$2,true)",
+    const live = await db.query(
+      `WITH context AS MATERIALIZED (
+         SELECT set_config('noctis.user_id',$1,true),
+                set_config('noctis.session_id',$2,true)
+       )
+       SELECT noctis.session_valid() AS valid FROM context`,
       [identity.userId, identity.sessionId],
     );
-    const live = await db.query("SELECT noctis.session_valid() AS valid");
     if (!live.rows[0].valid)
       throw Object.assign(
         new Error("Your session has expired. Please sign in."),
@@ -119,3 +122,4 @@ export async function closePools() {
     listenerPool.end(),
   ]));
 }
+

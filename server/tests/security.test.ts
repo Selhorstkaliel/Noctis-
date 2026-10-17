@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { randomUUID, createHmac } from "node:crypto";
 import WebSocket from "ws";
+import { TrackSource } from "livekit-server-sdk";
 process.env.NODE_ENV = "test";
 const { buildApp } = await import("../app.js");
 const { apiPool, authPool, closePools, transaction } = await import("../db.js");
@@ -186,6 +187,80 @@ test("BOLA: authentication does not grant server, channel, private-room, or sear
   const search = await request(member, "GET", "/search?q=classifiedquartz");
   assert.equal(search.status, 200);
   assert.equal(search.data.messages.length, 0);
+});
+test("friends can be found by name and requested once from search or a server profile", async () => {
+  const candidate = await createActor("candidate");
+  assert.equal(
+    (await request(candidate, "POST", `/servers/${serverId}/join`, {})).status,
+    200,
+  );
+
+  const visible = await request(owner, "GET", "/friends/search?q=candidate");
+  assert.equal(visible.status, 200, JSON.stringify(visible.data));
+  const person = visible.data.find((item: any) => item.id === candidate.id);
+  assert.equal(person.name, "Security candidate");
+  assert.equal(person.relationship, "none");
+  const byHandle = await request(
+    owner,
+    "GET",
+    `/friends/search?q=${encodeURIComponent(`@${person.handle}`)}`,
+  );
+  assert.equal(byHandle.status, 200, JSON.stringify(byHandle.data));
+  assert.equal(
+    byHandle.data.some((item: any) => item.id === candidate.id),
+    true,
+  );
+
+  const hidden = await request(outsider, "GET", "/friends/search?q=candidate");
+  assert.equal(hidden.status, 200, JSON.stringify(hidden.data));
+  assert.equal(
+    hidden.data.some((item: any) => item.id === candidate.id),
+    false,
+  );
+
+  const first = await request(owner, "POST", "/friends", {
+    targetId: candidate.id,
+  });
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.equal(first.data.relationship, "outgoing");
+  const duplicate = await request(owner, "POST", "/friends", {
+    targetId: candidate.id,
+  });
+  assert.equal(duplicate.status, 200, JSON.stringify(duplicate.data));
+  assert.equal(duplicate.data.relationship, "outgoing");
+
+  const candidateState = await request(candidate, "GET", "/bootstrap");
+  assert.equal(candidateState.status, 200, JSON.stringify(candidateState.data));
+  assert.equal(
+    candidateState.data.notifications.filter(
+      (notification: any) =>
+        notification.kind === "friend-request" &&
+        notification.actorId === owner.id,
+    ).length,
+    1,
+  );
+  const incoming = await request(
+    candidate,
+    "GET",
+    "/friends/search?q=Security",
+  );
+  assert.equal(
+    incoming.data.find((item: any) => item.id === owner.id).relationship,
+    "incoming",
+  );
+  assert.equal(
+    (
+      await request(candidate, "PUT", `/friends/${owner.id}`, {
+        accept: true,
+      })
+    ).status,
+    200,
+  );
+  const accepted = await request(owner, "GET", "/friends/search?q=candidate");
+  assert.equal(
+    accepted.data.find((item: any) => item.id === candidate.id).relationship,
+    "accepted",
+  );
 });
 test("message editing, reactions, replies, pins, and soft deletion obey ownership and room scope", async () => {
   const room = `${serverId}%2Fgeneral`;
@@ -725,6 +800,30 @@ function frame(ws: WebSocket, predicate: (v: any) => boolean, timeout = 8000) {
     ws.on("message", handler);
   });
 }
+test("short-lived realtime tickets connect without exposing the session cookie", async () => {
+  const issued = await request(member, "GET", "/realtime/ticket");
+  assert.equal(issued.status, 200, JSON.stringify(issued.data));
+  assert.match(issued.data.url, /^wss?:\/\//);
+  assert.ok(
+    typeof issued.data.ticket === "string" && issued.data.ticket.length > 40,
+  );
+  const target = new URL(issued.data.url);
+  target.hostname = new URL(address).hostname;
+  target.port = new URL(address).port;
+  target.protocol = "ws:";
+  target.searchParams.set("access_token", issued.data.ticket);
+  const ws = new WebSocket(target, {
+    headers: { Origin: process.env.APP_ORIGIN! },
+  });
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", resolve);
+    ws.once("error", reject);
+  });
+  const ready = frame(ws, (value) => value.type === "ready");
+  ws.send(JSON.stringify({ type: "auth", csrf: member.csrf }));
+  await ready;
+  ws.close();
+});
 test("live voice permissions revoke transmission and moderation removes the old room membership", async () => {
   const ws = connect(member);
   await new Promise<void>((resolve, reject) => {
@@ -738,9 +837,21 @@ test("live voice permissions revoke transmission and moderation removes the old 
   ws.send(JSON.stringify({ type: "voice.join", channelId: voiceId }));
   const admission = await joined;
   const connectionId = admission.connectionId;
+  const mediaGrant = JSON.parse(
+    Buffer.from(admission.media.token.split(".")[1], "base64url").toString(
+      "utf8",
+    ),
+  );
+  assert.ok(
+    mediaGrant.video.canPublishSources.includes(TrackSource.SCREEN_SHARE_AUDIO),
+  );
   const validationPath = `/media/rtc/validate?access_token=${encodeURIComponent(admission.media.token)}`;
   assert.equal((await request(member, "GET", validationPath)).status, 200);
-  assert.equal((await request(outsider, "GET", validationPath)).status, 403);
+  assert.equal((await request(undefined, "GET", validationPath)).status, 200);
+  assert.equal(
+    (await request(undefined, "GET", `${validationPath.slice(0, -1)}x`)).status,
+    401,
+  );
   const transmitting = frame(
     ws,
     (v) =>

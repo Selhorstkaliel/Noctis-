@@ -296,6 +296,44 @@ const portuguese: Record<string, string> = {
   "Reconnecting…": "Reconectando…",
   "Friends online": "Amigos online",
   "Add a friend": "Adicionar amigo",
+  "Add friend": "Adicionar amigo",
+  Friends: "Amigos",
+  "All friends": "Todos os amigos",
+  Pending: "Pendentes",
+  "YOUR PEOPLE": "SUAS PESSOAS",
+  "A familiar face goes a long way.":
+    "Ter por perto quem importa faz diferença.",
+  "Keep good company. Pick up where you left off.":
+    "Mantenha seus amigos por perto e continue de onde parou.",
+  "Search for people from your servers by name or username.":
+    "Busque pessoas dos seus servidores pelo nome ou nome de usuário.",
+  "Name or username": "Nome ou nome de usuário",
+  "Find people": "Buscar pessoas",
+  "Searching…": "Buscando…",
+  "Enter at least two characters to search.":
+    "Digite pelo menos dois caracteres para buscar.",
+  "No people found": "Nenhuma pessoa encontrada",
+  "Try another name or username. Only people visible to you can appear here.":
+    "Tente outro nome ou usuário. Apenas pessoas visíveis para você aparecem aqui.",
+  "Request sent": "Solicitação enviada",
+  "Requests closed": "Solicitações desativadas",
+  "Accept request": "Aceitar solicitação",
+  "Friend request sent": "Solicitação de amizade enviada",
+  "Friend request accepted": "Solicitação de amizade aceita",
+  "Friend request declined": "Solicitação de amizade recusada",
+  "Sent you a friend request": "Enviou uma solicitação de amizade para você",
+  "Waiting for response": "Aguardando resposta",
+  "Find a friend": "Buscar amigo",
+  "Send message": "Enviar mensagem",
+  "No pending requests": "Nenhuma solicitação pendente",
+  "No friends found": "Nenhum amigo encontrado",
+  "Search for someone by name to send a friend request.":
+    "Busque alguém pelo nome para enviar uma solicitação de amizade.",
+  "Try a different name or clear your search.":
+    "Tente outro nome ou limpe a busca.",
+  Accept: "Aceitar",
+  Decline: "Recusar",
+  Close: "Fechar",
   "View all friends": "Ver todos os amigos",
   "Happening now": "Acontecendo agora",
   OPEN: "ABERTO",
@@ -420,6 +458,19 @@ const portuguese: Record<string, string> = {
   Deafen: "Desativar áudio",
   "Stop sharing screen": "Parar de compartilhar a tela",
   "Share your screen": "Compartilhar sua tela",
+  "Cancel screen sharing": "Cancelar compartilhamento de tela",
+  "Choose whether people in the call should also hear audio from the shared source.":
+    "Escolha se as pessoas na chamada também devem ouvir o áudio da fonte compartilhada.",
+  "Share with sound": "Compartilhar com som",
+  "People will hear audio offered by the selected source.":
+    "As pessoas ouvirão o áudio disponibilizado pela fonte selecionada.",
+  "Share without sound": "Compartilhar sem som",
+  "Only the screen image will be shared.":
+    "Apenas a imagem da tela será compartilhada.",
+  "Audio availability depends on the browser and the window, tab, or screen you select next.":
+    "A disponibilidade do áudio depende do navegador e da janela, aba ou tela escolhida a seguir.",
+  "This source does not provide audio. The screen is being shared without sound.":
+    "Esta fonte não fornece áudio. A tela está sendo compartilhada sem som.",
   "Turn noise suppression off": "Desativar cancelamento de ruído",
   "Turn noise suppression on": "Ativar cancelamento de ruído",
   Sharing: "Compartilhando",

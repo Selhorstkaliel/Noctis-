@@ -17,7 +17,7 @@ npm run dev
 
 Open **http://localhost:5173**. Create an account, or use the private `SEED_EMAIL` and `SEED_PASSWORD` generated in `.env` for Alex Morgan's populated demo. Other seed identities have no password. On Windows with restricted PowerShell execution, use `npm.cmd`.
 
-New accounts must confirm their email. With the default local `MAIL_TRANSPORT=file`, the worker writes messages into `STORAGE_PATH/mail`; open the link from the matching local JSON message. These files contain private links and must stay outside the repository. Production uses MailerSend SMTP, configured in `.env.production.example`; see DEPLOYMENT.md. Manage MFA and passwords at `/#/settings/security`.
+New accounts must confirm their email. With the default local `MAIL_TRANSPORT=file`, the worker writes messages into `STORAGE_PATH/mail`; open the link from the matching local JSON message. These files contain private links and must stay outside the repository. Railway production uses the MailerSend HTTPS API, configured in `.env.production.example`; see DEPLOYMENT.md. Manage MFA and passwords at `/#/settings/security`.
 
 The API runs on 3001, frontend on 5173, PostgreSQL on localhost:54329 and LiveKit signaling on localhost:17880. WebRTC uses TCP 17881 and UDP 17882. Development starts the web app, API and worker. Setup preserves existing configuration; migrations and demo seeding preserve data. Stop local infrastructure with `docker compose stop postgres sfu` to retain the database volume.
 

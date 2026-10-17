@@ -40,8 +40,65 @@ export async function createServer(
   input: z.infer<typeof serverInput>,
   serverId = randomUUID(),
 ) {
+  const roleDefinitions = [
+    { name: "Member", position: 0, permissions: memberPermissions },
+    {
+      name: "Moderator",
+      position: 20,
+      permissions: [
+        ...memberPermissions,
+        "MANAGE_MESSAGES",
+        "MUTE_MEMBERS",
+        "DEAFEN_MEMBERS",
+        "MOVE_MEMBERS",
+        "KICK_MEMBERS",
+        "MANAGE_EVENTS",
+        "MUSIC_SKIP",
+        "MUSIC_STOP",
+        "MUSIC_VOLUME",
+        "MUSIC_QUEUE_MANAGE",
+        "MUSIC_MOVE",
+      ],
+    },
+    { name: "Admin", position: 50, permissions },
+  ];
+  const roleIds = roleDefinitions.map(() => randomUUID());
+  const rolePermissionRows = roleDefinitions.flatMap((role, index) =>
+    role.permissions.map((permission) => ({
+      roleId: roleIds[index],
+      permission,
+    })),
+  );
+  const categories = [
+    {
+      id: randomUUID(),
+      name: "Community",
+      position: 0,
+      channels: ["general", "introductions", "share-your-work", "inspiration"],
+    },
+    { id: randomUUID(), name: "Voice", position: 1, channels: ["lounge"] },
+  ];
+  const channels = categories.flatMap((category) =>
+    category.channels.map((slug, index) => ({
+      id: randomUUID(),
+      categoryId: category.id,
+      slug,
+      kind: category.name === "Voice" ? "voice" : "text",
+      position: category.position * 10 + index,
+    })),
+  );
   await db.query(
-    "INSERT INTO servers(id,owner_id,name,description,category,mark,is_public) VALUES($1,$2,$3,$4,$5,$6,$7)",
+    `WITH created_server AS (
+       INSERT INTO servers(id,owner_id,name,description,category,mark,is_public)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id
+     ), created_membership AS (
+       INSERT INTO server_members(server_id,user_id)
+       SELECT id,$2 FROM created_server
+       RETURNING server_id
+     )
+     SELECT created_server.id,(SELECT count(*) FROM created_membership) AS memberships
+     FROM created_server`,
     [
       serverId,
       userId,
@@ -58,75 +115,71 @@ export async function createServer(
     ],
   );
   await db.query(
-    "INSERT INTO server_members(server_id,user_id) VALUES($1,$2)",
-    [serverId, userId],
-  );
-  for (const [name, position, perms] of [
-    ["Member", 0, memberPermissions],
+    `WITH created_roles AS (
+       INSERT INTO roles(id,server_id,name,position,is_default)
+       SELECT role_id,$1,name,position,name='Member'
+       FROM unnest($2::text[],$3::text[],$4::integer[])
+         AS role(role_id,name,position)
+       RETURNING id
+     ), created_settings AS (
+       INSERT INTO music_settings(server_id) VALUES($1)
+       ON CONFLICT DO NOTHING
+       RETURNING server_id
+     ), created_metrics AS (
+       INSERT INTO music_metrics(server_id)
+       SELECT server_id FROM created_settings
+       ON CONFLICT DO NOTHING
+       RETURNING server_id
+     ), created_categories AS (
+       INSERT INTO channel_categories(id,server_id,name,position)
+       SELECT category_id,$1,name,position
+       FROM unnest($5::text[],$6::text[],$7::integer[])
+         AS category(category_id,name,position)
+       RETURNING id
+     )
+     SELECT (SELECT count(*) FROM created_roles) AS roles,
+            (SELECT count(*) FROM created_metrics) AS metrics,
+            (SELECT count(*) FROM created_categories) AS categories`,
     [
-      "Moderator",
-      20,
-      [
-        ...memberPermissions,
-        "MANAGE_MESSAGES",
-        "MUTE_MEMBERS",
-        "DEAFEN_MEMBERS",
-        "MOVE_MEMBERS",
-        "KICK_MEMBERS",
-        "MANAGE_EVENTS",
-        "MUSIC_SKIP",
-        "MUSIC_STOP",
-        "MUSIC_VOLUME",
-        "MUSIC_QUEUE_MANAGE",
-        "MUSIC_MOVE",
-      ],
+      serverId,
+      roleIds,
+      roleDefinitions.map((role) => role.name),
+      roleDefinitions.map((role) => role.position),
+      categories.map((category) => category.id),
+      categories.map((category) => category.name),
+      categories.map((category) => category.position),
     ],
-    ["Admin", 50, permissions],
-  ] as const) {
-    const r = await db.query(
-      "INSERT INTO roles(server_id,name,position,is_default) VALUES($1,$2,$3,$4) RETURNING id",
-      [serverId, name, position, name === "Member"],
-    );
-    for (const p of perms)
-      await db.query("INSERT INTO role_permissions VALUES($1,$2)", [
-        r.rows[0].id,
-        p,
-      ]);
-  }
-  await db.query(
-    "INSERT INTO music_settings(server_id) VALUES($1) ON CONFLICT DO NOTHING",
-    [serverId],
   );
   await db.query(
-    "INSERT INTO music_metrics(server_id) VALUES($1) ON CONFLICT DO NOTHING",
-    [serverId],
-  );
-  for (const [name, position, items] of [
+    `INSERT INTO role_permissions(role_id,permission)
+     SELECT role_id,permission
+     FROM unnest($1::text[],$2::text[]) AS item(role_id,permission)`,
     [
-      "Community",
-      0,
-      ["general", "introductions", "share-your-work", "inspiration"],
+      rolePermissionRows.map((row) => row.roleId),
+      rolePermissionRows.map((row) => row.permission),
     ],
-    ["Voice", 1, ["lounge"]],
-  ] as const) {
-    const r = await db.query(
-      "INSERT INTO channel_categories(server_id,name,position) VALUES($1,$2,$3) RETURNING id",
-      [serverId, name, position],
-    );
-    for (const [index, slug] of items.entries())
-      await db.query(
-        "INSERT INTO channels(server_id,category_id,name,slug,kind,position) VALUES($1,$2,$3,$3,$4,$5)",
-        [
-          serverId,
-          r.rows[0].id,
-          slug,
-          name === "Voice" ? "voice" : "text",
-          position * 10 + index,
-        ],
-      );
-  }
-  await audit(db, userId, "server.created", serverId, serverId);
-  await changed(db, `user:${userId}`);
+  );
+  const channelValues = channels.flatMap((channel) => [
+    channel.id,
+    serverId,
+    channel.categoryId,
+    channel.slug,
+    channel.kind,
+    channel.position,
+  ]);
+  await db.query(
+    `INSERT INTO channels(id,server_id,category_id,name,slug,kind,position) VALUES ${channels
+      .map((_, index) => {
+        const offset = index * 6;
+        return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 4},$${offset + 5},$${offset + 6})`;
+      })
+      .join(",")}`,
+    channelValues,
+  );
+  await db.query(
+    "SELECT noctis.append_audit($1,'server.created',$2,$2,'{}'::jsonb),pg_notify('noctis_changes',$3)",
+    [userId, serverId, `user:${userId}`],
+  );
   return serverId;
 }
 export async function communityRoutes(app: FastifyInstance) {
@@ -781,26 +834,113 @@ export async function communityRoutes(app: FastifyInstance) {
       return { ok: true };
     }),
   );
+  app.get("/api/friends/search", async (req) => {
+    const input = z
+      .object({
+        q: z.string().trim().min(2).max(60),
+        limit: z.coerce.number().int().min(1).max(20).default(12),
+      })
+      .strict()
+      .parse(req.query);
+    await throttle("friend-search", req.identity.userId, 60, 60);
+    return transaction(req.identity, async (db) => {
+      const term = input.q.replace(/^@/, "");
+      const pattern = `%${term.replace(/[%_\\]/g, "\\$&")}%`;
+      const result = await db.query(
+        `SELECT p.user_id AS id,p.name,p.handle,p.avatar,p.avatar_upload_id,p.color,
+                CASE WHEN pr.user_id IS NULL THEN 'offline' ELSE p.status END AS status,
+                p.allow_friend_requests AS "canRequest",
+                CASE
+                  WHEN f.status='accepted' THEN 'accepted'
+                  WHEN f.requester_id=$1 THEN 'outgoing'
+                  WHEN f.recipient_id=$1 THEN 'incoming'
+                  ELSE 'none'
+                END AS relationship
+           FROM profiles p
+           LEFT JOIN presence pr ON pr.user_id=p.user_id
+             AND pr.updated_at>now()-interval '45 seconds'
+           LEFT JOIN friendships f ON
+             (f.requester_id=$1 AND f.recipient_id=p.user_id) OR
+             (f.recipient_id=$1 AND f.requester_id=p.user_id)
+          WHERE p.user_id<>$1
+            AND NOT noctis.blocked($1,p.user_id)
+            AND (p.name ILIKE $2 OR p.handle ILIKE $2)
+          ORDER BY
+            (lower(p.handle)=lower($3)) DESC,
+            (lower(p.name) LIKE lower($3)||'%') DESC,
+            p.name,p.user_id
+          LIMIT $4`,
+        [req.identity.userId, pattern, term, input.limit],
+      );
+      return result.rows.map(({ avatar_upload_id, ...profile }) => ({
+        ...profile,
+        avatarUrl: avatar_upload_id
+          ? `/api/uploads/${avatar_upload_id}`
+          : undefined,
+      }));
+    });
+  });
   app.post("/api/friends", async (req) => {
     const input = z
-      .object({ handle: text.max(32) })
+      .object({
+        targetId: id.optional(),
+        handle: text.max(32).optional(),
+      })
       .strict()
+      .refine(
+        (value) => Number(!!value.targetId) + Number(!!value.handle) === 1,
+        {
+          message: "Choose one person.",
+        },
+      )
       .parse(req.body);
     await throttle("friend-request", req.identity.userId, 15, 3600);
     return transaction(req.identity, async (db) => {
-      const r = await db.query("SELECT user_id FROM profiles WHERE handle=$1", [
-        input.handle.replace(/^@/, ""),
-      ]);
+      const r = await db.query(
+        "SELECT user_id FROM profiles WHERE ($1::text IS NOT NULL AND user_id=$1) OR ($2::text IS NOT NULL AND lower(handle)=lower($2))",
+        [input.targetId || null, input.handle?.replace(/^@/, "") || null],
+      );
       requireThat(r.rowCount, 404, "This person is unavailable.");
       const target = r.rows[0].user_id;
+      requireThat(
+        target !== req.identity.userId,
+        400,
+        "You cannot send a friend request to yourself.",
+      );
       const p = await canContact(db, target, req.identity.userId);
+      await db.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('friendship:'||least($1,$2)||':'||greatest($1,$2),0))",
+        [req.identity.userId, target],
+      );
+      const existing = await db.query(
+        "SELECT requester_id,recipient_id,status FROM friendships WHERE (requester_id=$1 AND recipient_id=$2) OR (requester_id=$2 AND recipient_id=$1)",
+        [req.identity.userId, target],
+      );
+      if (existing.rowCount) {
+        const friendship = existing.rows[0];
+        if (friendship.status === "accepted")
+          return { ok: true, relationship: "accepted" };
+        if (friendship.requester_id === req.identity.userId)
+          return { ok: true, relationship: "outgoing" };
+        await db.query(
+          "UPDATE friendships SET status='accepted' WHERE requester_id=$1 AND recipient_id=$2",
+          [target, req.identity.userId],
+        );
+        await db.query(
+          "INSERT INTO notifications(user_id,actor_id,kind,title,route) VALUES($1,$2,'friend-accepted','Your friend request was accepted','friends')",
+          [target, req.identity.userId],
+        );
+        await changed(db, `user:${target}`);
+        await changed(db, `user:${req.identity.userId}`);
+        return { ok: true, relationship: "accepted" };
+      }
       requireThat(
         p.allow_friend_requests,
         403,
         "This person is not accepting friend requests.",
       );
       await db.query(
-        "INSERT INTO friendships(requester_id,recipient_id,status) VALUES($1,$2,'pending') ON CONFLICT DO NOTHING",
+        "INSERT INTO friendships(requester_id,recipient_id,status) VALUES($1,$2,'pending')",
         [req.identity.userId, target],
       );
       await db.query(
@@ -809,7 +949,7 @@ export async function communityRoutes(app: FastifyInstance) {
       );
       await changed(db, `user:${target}`);
       await changed(db, `user:${req.identity.userId}`);
-      return { ok: true };
+      return { ok: true, relationship: "outgoing" };
     });
   });
   app.put("/api/friends/:id", (req) =>
@@ -818,10 +958,14 @@ export async function communityRoutes(app: FastifyInstance) {
       const input = z.object({ accept: z.boolean() }).strict().parse(req.body);
       if (input.accept) {
         const r = await db.query(
-          "UPDATE friendships SET status='accepted' WHERE requester_id=$1 AND recipient_id=$2 AND NOT noctis.blocked($1,$2) RETURNING requester_id",
+          "UPDATE friendships SET status='accepted' WHERE requester_id=$1 AND recipient_id=$2 AND status='pending' AND NOT noctis.blocked($1,$2) RETURNING requester_id",
           [p.id, req.identity.userId],
         );
         requireThat(r.rowCount);
+        await db.query(
+          "INSERT INTO notifications(user_id,actor_id,kind,title,route) VALUES($1,$2,'friend-accepted','Your friend request was accepted','friends')",
+          [p.id, req.identity.userId],
+        );
       } else
         await db.query(
           "DELETE FROM friendships WHERE (requester_id=$1 AND recipient_id=$2) OR (requester_id=$2 AND recipient_id=$1)",

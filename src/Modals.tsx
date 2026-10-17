@@ -35,6 +35,19 @@ import {
   loadRoom,
   refresh,
 } from "./store";
+import { useI18n } from "./i18n";
+
+type FriendSearchResult = {
+  id: string;
+  name: string;
+  handle: string;
+  avatar: number;
+  avatarUrl?: string;
+  color: string;
+  status: "online" | "idle" | "offline";
+  canRequest: boolean;
+  relationship: "none" | "outgoing" | "incoming" | "accepted";
+};
 
 export function ModalContent({
   modal,
@@ -45,6 +58,7 @@ export function ModalContent({
 }) {
   const store = useStore();
   const { toast, open } = useUI();
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
     {
@@ -56,6 +70,8 @@ export function ModalContent({
     }[]
   >([]);
   const [searchBusy, setSearchBusy] = useState(false);
+  const [friendResults, setFriendResults] = useState<FriendSearchResult[]>([]);
+  const [friendSearchBusy, setFriendSearchBusy] = useState(false);
   useEffect(() => {
     if (modal.type !== "search" || query.trim().length < 2) {
       setSearchResults([]);
@@ -109,6 +125,34 @@ export function ModalContent({
         })
         .finally(() => {
           if (!controller.signal.aborted) setSearchBusy(false);
+        });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, modal.type]);
+  useEffect(() => {
+    if (modal.type !== "add-friend" || query.trim().length < 2) {
+      setFriendResults([]);
+      setFriendSearchBusy(false);
+      return;
+    }
+    const controller = new AbortController();
+    setFriendSearchBusy(true);
+    const timer = setTimeout(() => {
+      api<FriendSearchResult[]>(
+        "/friends/search?q=" + encodeURIComponent(query.trim()),
+        "GET",
+        undefined,
+        controller.signal,
+      )
+        .then(setFriendResults)
+        .catch((e) => {
+          if (e.name !== "AbortError") setError(e.message);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setFriendSearchBusy(false);
         });
     }, 250);
     return () => {
@@ -188,6 +232,17 @@ export function ModalContent({
       modal.id === store.profile.id
         ? store.profile
         : getUser(modal.id || "sophie");
+    const friendship = store.friendships.find(
+      (item) => item.requesterId === user.id || item.recipientId === user.id,
+    );
+    const relationship =
+      friendship?.status === "accepted"
+        ? "accepted"
+        : friendship?.requesterId === store.profile.id
+          ? "outgoing"
+          : friendship?.recipientId === store.profile.id
+            ? "incoming"
+            : "none";
     title = user.name;
     className = "profile-dialog";
     body = (
@@ -287,13 +342,33 @@ export function ModalContent({
           ) : (
             <>
               <Button
-                icon="Users"
+                icon={relationship === "accepted" ? "CircleCheck" : "UserPlus"}
+                disabled={
+                  relationship === "accepted" || relationship === "outgoing"
+                }
                 onClick={async () => {
-                  await command("/friends", "POST", { handle: user.handle });
-                  toast("Friend request sent");
+                  if (relationship === "incoming") {
+                    await command(`/friends/${user.id}`, "PUT", {
+                      accept: true,
+                    });
+                    await refresh();
+                    toast(t("Friend request accepted"));
+                  } else {
+                    await command("/friends", "POST", { targetId: user.id });
+                    await refresh();
+                    toast(t("Friend request sent"));
+                  }
                 }}
               >
-                Add friend
+                {t(
+                  relationship === "accepted"
+                    ? "Friends"
+                    : relationship === "outgoing"
+                      ? "Request sent"
+                      : relationship === "incoming"
+                        ? "Accept request"
+                        : "Add friend",
+                )}
               </Button>
               <Button
                 variant="ghost"
@@ -1180,11 +1255,125 @@ export function ModalContent({
         </div>
       </>
     );
-  } else if (modal.type === "new-message" || modal.type === "add-friend") {
-    title =
-      modal.type === "add-friend"
-        ? "Good company starts with hello"
-        : "Start a conversation";
+  } else if (modal.type === "add-friend") {
+    title = t("Add a friend");
+    body = (
+      <>
+        <p className="modal-intro">
+          {t("Search for people from your servers by name or username.")}
+        </p>
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder={t("Name or username")}
+          label={t("Find people")}
+          autoFocus
+        />
+        {errors}
+        <div className="people-picker friend-search-results" aria-live="polite">
+          {friendSearchBusy ? (
+            <p className="friend-search-note">{t("Searching…")}</p>
+          ) : query.trim().length < 2 ? (
+            <p className="friend-search-note">
+              {t("Enter at least two characters to search.")}
+            </p>
+          ) : friendResults.length ? (
+            friendResults.map((person) => {
+              const disabled =
+                person.relationship === "accepted" ||
+                person.relationship === "outgoing" ||
+                (!person.canRequest && person.relationship === "none");
+              const label =
+                person.relationship === "accepted"
+                  ? t("Friends")
+                  : person.relationship === "outgoing"
+                    ? t("Request sent")
+                    : person.relationship === "incoming"
+                      ? t("Accept request")
+                      : person.canRequest
+                        ? t("Add friend")
+                        : t("Requests closed");
+              return (
+                <div className="friend-search-row" key={person.id}>
+                  <Avatar
+                    user={{
+                      ...person,
+                      activity: "",
+                      role: "Member",
+                      bio: "",
+                      xp: 0,
+                    }}
+                    size={40}
+                  />
+                  <button
+                    className="friend-search-identity"
+                    onClick={() => open({ type: "profile", id: person.id })}
+                  >
+                    <strong>{person.name}</strong>
+                    <small>@{person.handle}</small>
+                  </button>
+                  <Button
+                    variant={
+                      person.relationship === "none" ? "primary" : "secondary"
+                    }
+                    icon={
+                      person.relationship === "accepted"
+                        ? "CircleCheck"
+                        : "UserPlus"
+                    }
+                    disabled={disabled}
+                    onClick={async () => {
+                      let next: FriendSearchResult["relationship"];
+                      if (person.relationship === "incoming") {
+                        await command(`/friends/${person.id}`, "PUT", {
+                          accept: true,
+                        });
+                        next = "accepted";
+                        toast(t("Friend request accepted"));
+                      } else {
+                        const result = await command<{
+                          relationship: FriendSearchResult["relationship"];
+                        }>("/friends", "POST", { targetId: person.id });
+                        next = result.relationship;
+                        toast(
+                          t(
+                            next === "accepted"
+                              ? "Friend request accepted"
+                              : "Friend request sent",
+                          ),
+                        );
+                      }
+                      setFriendResults((current) =>
+                        current.map((item) =>
+                          item.id === person.id
+                            ? { ...item, relationship: next }
+                            : item,
+                        ),
+                      );
+                      await refresh();
+                    }}
+                  >
+                    {label}
+                  </Button>
+                </div>
+              );
+            })
+          ) : (
+            <EmptyState
+              title={t("No people found")}
+              description={t(
+                "Try another name or username. Only people visible to you can appear here.",
+              )}
+            />
+          )}
+        </div>
+        <div className="dialog-actions">
+          <Button onClick={close}>{t("Close")}</Button>
+        </div>
+      </>
+    );
+  } else if (modal.type === "new-message") {
+    title = "Start a conversation";
     const groupMode = modal.extra === "group" || selected.length > 1;
     const filtered = users.filter(
       (u) =>
@@ -1264,16 +1453,8 @@ export function ModalContent({
                 goto(`messages/${id}`);
                 toast("Group conversation created");
               } else {
-                if (modal.type === "add-friend") {
-                  await command("/friends", "POST", {
-                    handle: getUser(selected[0]).handle,
-                  });
-                  toast("Friend request sent");
-                  close();
-                } else {
-                  await openConversation(selected[0]);
-                  close();
-                }
+                await openConversation(selected[0]);
+                close();
               }
             }}
           >
